@@ -1,0 +1,47 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD
+classDef default fill:#f0f2f6,stroke:#4b4b4b,stroke-width:2px,rx:10,ry:10;
+classDef startend fill:#ff4b4b,stroke:#ff4b4b,color:white,font-weight:bold,rx:20,ry:20;
+classDef tool fill:#e3f2fd,stroke:#1565c0,stroke-width:2px,rx:10,ry:10;
+classDef generate fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px,rx:10,ry:10;
+classDef judge fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px,rx:10,ry:10;
+classDef rewrite fill:#fff8e1,stroke:#e65100,stroke-width:2px,rx:10,ry:10;
+classDef hitl fill:#ffebee,stroke:#c62828,stroke-width:2px,rx:10,ry:10;
+class __start__,__end__ startend;
+class vector_search,web_search,github_read tool;
+class generator generate;
+class judge judge;
+class rewrite rewrite;
+class hitl hitl;
+;
+	__start__([<p>__start__</p>]):::first
+	router(router)
+	vector_search(vector_search)
+	web_search(web_search)
+	github_read(github_read)
+	generator(generator)
+	judge(judge)
+	rewrite(rewrite)
+	hitl(hitl)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> router;
+	generator --> judge;
+	github_read --> router;
+	judge -. &nbsp;end&nbsp; .-> __end__;
+	judge -.-> hitl;
+	judge -.-> rewrite;
+	rewrite --> router;
+	router -. &nbsp;generate&nbsp; .-> generator;
+	router -.-> github_read;
+	router -.-> vector_search;
+	router -.-> web_search;
+	vector_search --> router;
+	web_search --> router;
+	hitl --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
