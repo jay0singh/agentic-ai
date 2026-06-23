@@ -118,6 +118,11 @@ GITHUB_TOKEN=your_github_token_here
 # Groq (judge model — free tier) — https://console.groq.com
 GROQ_API_KEY=your_groq_api_key_here
 JUDGE_MODEL=llama-3.3-70b-versatile
+
+# Langfuse (observability — optional, traces stay disabled if unset)
+LANGFUSE_PUBLIC_KEY=your_langfuse_public_key_here
+LANGFUSE_SECRET_KEY=your_langfuse_secret_key_here
+LANGFUSE_BASE_URL=http://localhost:3000
 ```
 
 ---
@@ -225,6 +230,28 @@ The UI opens automatically at `http://localhost:8501`.
 - HITL warning shown inline when the judge could not get a satisfactory answer after max retries
 - API health indicator in the sidebar
 - Clear chat button
+
+---
+
+## Observability with Langfuse
+
+Every `/chat` request is traced end-to-end (router → tools → generator → judge → rewrite/HITL) when Langfuse keys are set. Tracing is fully optional — if `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are unset, the app runs exactly as before with no Langfuse calls.
+
+### Run Langfuse locally
+
+```bash
+git clone https://github.com/langfuse/langfuse.git
+cd langfuse
+docker compose up -d
+```
+
+Open `http://localhost:3000`, create a project, and copy the generated public/secret keys into your `.env` (see above).
+
+### What gets traced
+
+- A full trace per `/chat` call, named `rag-chat`, tagged `rag-demo`
+- Each LangGraph node (router, vector_search, web_search, github_read, generator, judge, rewrite, hitl) as a nested span, including LLM calls with prompts/completions and token usage
+- A `judge_decision` score (1 = accept, 0 = retry) with the judge's reasoning attached as a comment — lets you filter traces in the Langfuse UI by where the judge struggled
 
 ---
 

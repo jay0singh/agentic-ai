@@ -18,3 +18,4 @@ psycopg[binary]
 docx2txt
 langchain-groq
 streamlit
+langfuse

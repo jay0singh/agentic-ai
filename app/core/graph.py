@@ -19,6 +19,16 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
 
+# Langfuse tracing — only active when keys are configured.
+_langfuse_handler = None
+if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+    try:
+        from langfuse.langchain import CallbackHandler
+        _langfuse_handler = CallbackHandler()
+        print("[Config] Langfuse tracing enabled.")
+    except Exception as e:
+        print(f"[Config] Langfuse init failed ({e}). Tracing disabled.")
+
 CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.2")
 chat_model = ChatOllama(model=CHAT_MODEL)
 
@@ -520,6 +530,21 @@ def route_next(state: AgentState) -> str:
 MAX_JUDGE_CONTEXT_CHARS = 4000
 
 
+def _score_judge_decision(decision: str, reasoning: str) -> None:
+    """Attach the judge's verdict to the active Langfuse trace, if tracing is enabled."""
+    if not _langfuse_handler:
+        return
+    try:
+        from langfuse import get_client
+        get_client().score_current_trace(
+            name="judge_decision",
+            value=1 if decision == "accept" else 0,
+            comment=reasoning,
+        )
+    except Exception as e:
+        print(f"  [Judge] Langfuse scoring failed: {e}")
+
+
 def judge_node(state: AgentState) -> dict:
     print("  [Judge] Evaluating answer...")
     print(f"  [Judge] Steps taken: {state.get('steps_taken', [])}")
@@ -532,6 +557,7 @@ def judge_node(state: AgentState) -> dict:
 
     def _accept(reason: str) -> dict:
         print(f"  [Judge] {reason}")
+        _score_judge_decision("accept", reason)
         return {
             "judge_decision": "accept",
             "steps_taken": steps_taken + ["judge"],
@@ -627,6 +653,8 @@ RETRY format:
             print(f"  [Judge] Answer accepted. Reason: {reasoning}")
             log_entry = f"ACCEPT: {reasoning}"
 
+        _score_judge_decision(decision, reasoning)
+
         return {
             "judge_decision": decision,
             "rewritten_query": result.get("rewritten_query"),
@@ -637,10 +665,12 @@ RETRY format:
     except Exception as e:
         print(f"  [Judge] Error parsing response: {e}")
         print("  [Judge] Defaulting to ACCEPT.")
+        reason = f"Judge error ({e}). Defaulted to accept."
+        _score_judge_decision("accept", reason)
         return {
             "judge_decision": "accept",
             "steps_taken": steps_taken + ["judge"],
-            "judge_log": judge_log + [f"ACCEPT: Judge error ({e}). Defaulted to accept."]
+            "judge_log": judge_log + [f"ACCEPT: {reason}"]
         }
     
 def rewrite_node(state: AgentState) -> dict:
@@ -755,4 +785,11 @@ def run_orchestrator(query: str) -> dict:
         "rewritten_query": None,
         "judge_log": [],
     }
-    return app.invoke(initial_state)
+    config = {}
+    if _langfuse_handler:
+        config = {
+            "callbacks": [_langfuse_handler],
+            "run_name": "rag-chat",
+            "metadata": {"langfuse_tags": ["rag-demo"]},
+        }
+    return app.invoke(initial_state, config=config)
