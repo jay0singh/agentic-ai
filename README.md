@@ -1,6 +1,6 @@
 # RAG Demo — Agentic Retrieval-Augmented Generation
 
-A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluation loop, and a Human-in-the-Loop (HITL) fallback. Built with FastAPI, Ollama, PostgreSQL + pgvector, Tavily, and Groq.
+A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluation loop, and a Human-in-the-Loop (HITL) fallback. Built with FastAPI, PostgreSQL + pgvector, Streamlit, and **100% free cloud APIs**: Groq (chat + judge), Google Gemini (embeddings), and Tavily (web search). No local models required.
 
 ---
 
@@ -11,10 +11,10 @@ User Query
     │
     ▼
 ┌─────────┐     ┌──────────────┐     ┌─────────────┐
-│ Router  │────▶│ Vector Search│────▶│             │
-│ (plans  │     └──────────────┘     │  Generator  │
-│  tools) │────▶┌──────────────┐────▶│  (llama3.2) │
-│         │     │  Web Search  │     │             │
+│ Router  │────▶│ Vector Search│────▶│  Generator  │
+│ (plans  │     └──────────────┘     │   (Groq     │
+│  tools) │────▶┌──────────────┐────▶│  llama-3.1  │
+│         │     │  Web Search  │     │ 8b-instant) │
 │         │────▶└──────────────┘     └──────┬──────┘
 │         │     ┌──────────────┐            │
 │         │────▶│ GitHub Read  │            ▼
@@ -32,6 +32,14 @@ User Query
                                     (logs to terminal)
 ```
 
+**Models (all free tier):**
+
+| Role | Model | Provider |
+|---|---|---|
+| Router / Generator | `llama-3.1-8b-instant` | Groq |
+| Judge | `llama-3.3-70b-versatile` | Groq |
+| Embeddings | `gemini-embedding-001` (768-dim) | Google Gemini |
+
 ---
 
 ## Prerequisites
@@ -39,10 +47,10 @@ User Query
 | Requirement | Version | Notes |
 |---|---|---|
 | Python | 3.11+ | |
-| PostgreSQL | 14+ | With the `pgvector` extension enabled |
-| Ollama | Latest | Running locally at `http://localhost:11434` |
-| Groq API key | — | Free tier at [console.groq.com](https://console.groq.com) |
-| Tavily API key | — | Free tier at [tavily.com](https://tavily.com) |
+| Docker | Any recent | Runs PostgreSQL + pgvector (no local install needed) |
+| Groq API key | — | Free tier, no credit card — [console.groq.com/keys](https://console.groq.com/keys) |
+| Google Gemini API key | — | Free tier, no credit card — [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| Tavily API key | — | Optional (enables web search) — free tier at [tavily.com](https://tavily.com) |
 | GitHub Token | — | Optional — increases GitHub API rate limits |
 
 ---
@@ -67,36 +75,23 @@ source .venv/bin/activate
 ### 2. Install dependencies
 
 ```bash
-cd app
-pip install -r requirements.txt
+pip install -r app/requirements.txt
 ```
 
-### 3. Set up PostgreSQL with pgvector
-
-Create a database and enable the extension:
-
-```sql
-CREATE DATABASE vectordb;
-\c vectordb
-CREATE EXTENSION IF NOT EXISTS vector;
-```
-
-### 4. Pull Ollama models
+### 3. Start PostgreSQL + pgvector in Docker
 
 ```bash
-# Generator model (used for answering queries)
-ollama pull llama3.2
-
-# Embedding model (used for document ingestion and vector search)
-ollama pull nomic-embed-text
+docker compose up -d
 ```
 
-### 5. Configure environment variables
+This starts a `pgvector-db` container on port 5433 with a persistent `pgvector_data` volume. The pgvector extension and the `documents` table are created automatically on first ingest. If the container already exists from a previous run, `docker start pgvector-db` also works.
 
-Copy the example below into a `.env` file at the project root (`rag-demo/.env`):
+### 4. Configure environment variables
+
+Copy the example below into a `.env` file at the project root (`agentic-ai/.env`) and paste in your keys:
 
 ```env
-# PostgreSQL
+# PostgreSQL (matches the pgvector-db Docker container)
 DB_NAME=vectordb
 DB_USER=postgres
 DB_PASSWORD=postgres
@@ -104,20 +99,23 @@ DB_HOST=localhost
 DB_PORT=5433
 DB_TABLE=documents
 
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-EMBED_MODEL=nomic-embed-text
-CHAT_MODEL=llama3.2
+# Groq (chat + judge, free tier) — https://console.groq.com/keys
+GROQ_API_KEY=your_groq_api_key_here
 
-# Tavily (web search) — https://tavily.com
-TAVILY_API_KEY=your_tavily_api_key_here
+# Google Gemini (embeddings, free tier) — https://aistudio.google.com/apikey
+GOOGLE_API_KEY=your_gemini_api_key_here
+
+# Models (all free-tier cloud models)
+CHAT_MODEL=llama-3.1-8b-instant
+JUDGE_MODEL=llama-3.3-70b-versatile
+EMBED_MODEL=models/gemini-embedding-001
+EMBED_DIM=768
+
+# Tavily (web search, optional) — https://tavily.com
+TAVILY_API_KEY=
 
 # GitHub (optional — raises API rate limits)
-GITHUB_TOKEN=your_github_token_here
-
-# Groq (judge model — free tier) — https://console.groq.com
-GROQ_API_KEY=your_groq_api_key_here
-JUDGE_MODEL=llama-3.3-70b-versatile
+GITHUB_TOKEN=
 
 # Langfuse (observability — optional, traces stay disabled if unset)
 LANGFUSE_PUBLIC_KEY=your_langfuse_public_key_here
@@ -138,8 +136,36 @@ The API will be available at `http://127.0.0.1:8000`.
 
 Startup log should show:
 ```
+[Config] Chat model: Groq (llama-3.1-8b-instant)
 [Config] Judge model: Groq (llama-3.3-70b-versatile)
 ```
+
+---
+
+## Running the Frontend
+
+Run Streamlit alongside the API:
+
+```bash
+# Terminal 1 — API
+cd app
+uvicorn api:app --reload --port 8000
+
+# Terminal 2 — Frontend
+cd app
+streamlit run streamlit_app.py
+```
+
+The UI opens automatically at `http://localhost:8501`.
+
+**Features:**
+- Chat interface with full conversation history
+- Document upload and ingestion (PDF / DOCX) from the sidebar
+- Step badges on every response showing exactly which tools ran (`🔍 vector_search`, `🌐 web_search`, `⚖️ judge`, etc.)
+- Judge reasoning and retrieved sources in expandable panels
+- HITL warning shown inline when the judge could not get a satisfactory answer after max retries
+- API health indicator in the sidebar
+- Clear chat button
 
 ---
 
@@ -166,11 +192,13 @@ Response:
 ```json
 {
   "filename": "NimbusCart_Policy_Handbook.docx",
-  "characters_extracted": 42000,
-  "chunks_stored": 84,
+  "characters_extracted": 46368,
+  "chunks_stored": 117,
   "message": "Document ingested successfully."
 }
 ```
+
+> **Note on the free tier:** Gemini's free tier allows 100 embedding requests per minute. Documents that produce more than ~50 chunks are embedded in batches with an automatic pause between them, so a large ingest can take a couple of minutes — this is expected, not a hang.
 
 ---
 
@@ -189,7 +217,8 @@ Response:
   "question": "What is NimbusCart's return policy?",
   "answer": "NimbusCart offers a 30-day return window...",
   "steps_taken": ["vector_search", "generate", "judge"],
-  "context_sources": ["--- [Vector Search Result..."]
+  "context_sources": ["--- [Vector Search Result..."],
+  "judge_log": ["ACCEPT: The answer is directly supported by the context."]
 }
 ```
 
@@ -200,36 +229,10 @@ Response:
 | `vector_search` | Searched the ingested document database |
 | `web_search` | Searched the public web via Tavily |
 | `github_read` | Fetched content from a GitHub repository |
-| `generate` | Generated an answer using llama3.2 |
-| `judge` | Evaluated the answer using Groq llama-3.3-70b |
+| `generate` | Generated an answer using Groq llama-3.1-8b-instant |
+| `judge` | Evaluated the answer using Groq llama-3.3-70b-versatile |
 | `rewrite` | Query was rewritten and retried |
 | `hitl` | Max retries reached — flagged for human review |
-
----
-
-## Running the Frontend
-
-Install Streamlit (already in `requirements.txt`) and run it alongside the API:
-
-```bash
-# Terminal 1 — API
-cd app
-uvicorn api:app --reload --port 8000
-
-# Terminal 2 — Frontend
-cd app
-streamlit run streamlit_app.py
-```
-
-The UI opens automatically at `http://localhost:8501`.
-
-**Features:**
-- Chat interface with full conversation history
-- Document upload and ingestion (PDF / DOCX) from the sidebar
-- Step badges on every response showing exactly which tools ran (`🔍 vector_search`, `🌐 web_search`, `⚖️ judge`, etc.)
-- HITL warning shown inline when the judge could not get a satisfactory answer after max retries
-- API health indicator in the sidebar
-- Clear chat button
 
 ---
 
@@ -293,16 +296,19 @@ This produces two outputs:
 ## Project Structure
 
 ```
-rag-demo/
+agentic-ai/
 ├── .env                        # Environment variables (not committed)
 ├── documents/                  # Sample documents for ingestion
 │   └── NimbusCart_Policy_Handbook.docx
 └── app/
     ├── api.py                  # FastAPI routes (/health, /ingest, /chat)
+    ├── streamlit_app.py        # Streamlit chat frontend
+    ├── main.py                 # CLI entry point (ingest / chat modes)
     ├── generate_graph.py       # Graph visualisation script
     ├── requirements.txt        # Python dependencies
     └── core/
         ├── graph.py            # LangGraph nodes and workflow (main logic)
+        ├── embeddings.py       # Gemini embeddings (swap provider here)
         ├── generator.py        # Legacy generator (used by api.py)
         ├── embedder.py         # Embedding and pgvector storage
         ├── retriever.py        # Vector similarity search
