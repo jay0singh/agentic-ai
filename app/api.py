@@ -6,6 +6,7 @@ if sys.platform == 'win32':
 import os
 import shutil
 import tempfile
+import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
@@ -91,8 +92,14 @@ async def ingest(file: UploadFile = File(...)):
         chunks = chunk_text(text, chunk_size=500, overlap=50)
         setup_table()
         embed_and_store(chunks)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        # Log the full error server-side only — raw exception text can leak
+        # connection strings or other internals to the client.
+        print(f"[Ingest] Failed for '{filename}':\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail="Ingestion failed. Check the server logs for details."
+        )
 
     return {
         "filename": filename,
@@ -116,8 +123,12 @@ def chat(request: ChatRequest):
             session_id=request.session_id,
             user_id=request.user_id,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        print(f"[Chat] Failed to answer question:\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate an answer. Check the server logs for details."
+        )
 
     return {
         "question": request.question,

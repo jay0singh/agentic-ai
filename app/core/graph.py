@@ -3,7 +3,6 @@ import json
 import base64
 import requests
 import urllib.parse
-import urllib3
 from typing import TypedDict, List, Dict, Any, Optional
 
 from dotenv import load_dotenv
@@ -12,9 +11,6 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 
 from core.retriever import retrieve
-
-# Suppress insecure request warnings from using verify=False
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 load_dotenv()
 
@@ -64,16 +60,16 @@ class AgentState(TypedDict):
 # ── Helper REST Functions ──────────────────────────────────────────────────────
 
 def web_search(query: str) -> str:
-    """Perform web search using Tavily REST API (SSL verify=False for environment compatibility)."""
+    """Perform web search using the Tavily REST API."""
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         return "Error: TAVILY_API_KEY is not set in environment."
     try:
         response = requests.post(
             "https://api.tavily.com/search",
-            json={"api_key": api_key, "query": query, "max_results": 5},
-            timeout=15,
-            verify=False
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"query": query, "max_results": 5},
+            timeout=15
         )
         response.raise_for_status()
         data = response.json()
@@ -86,7 +82,7 @@ def web_search(query: str) -> str:
 
 
 def github_read(operation: str, owner: str, repo: str, path: Optional[str] = None) -> str:
-    """Retrieve repository details, README, or specific files via GitHub REST API (verify=False)."""
+    """Retrieve repository details, README, or specific files via the GitHub REST API."""
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -101,7 +97,7 @@ def github_read(operation: str, owner: str, repo: str, path: Optional[str] = Non
                 return "Error: File path is required for read_file operation."
             encoded_path = urllib.parse.quote(path,safe="/")
             url = f"https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}"
-            res = requests.get(url, headers=headers, timeout=10, verify=False)
+            res = requests.get(url, headers=headers, timeout=10)
             res.raise_for_status()
             data = res.json()
             content = base64.b64decode(data["content"]).decode("utf-8", errors="ignore")
@@ -109,7 +105,7 @@ def github_read(operation: str, owner: str, repo: str, path: Optional[str] = Non
 
         elif operation == "read_readme":
             url = f"https://api.github.com/repos/{owner}/{repo}/readme"
-            res = requests.get(url, headers=headers, timeout=10, verify=False)
+            res = requests.get(url, headers=headers, timeout=10)
             res.raise_for_status()
             data = res.json()
             content = base64.b64decode(data["content"]).decode("utf-8", errors="ignore")
@@ -118,7 +114,7 @@ def github_read(operation: str, owner: str, repo: str, path: Optional[str] = Non
         elif operation == "list_issues":
             url = f"https://api.github.com/repos/{owner}/{repo}/issues"
             params = {"state": "open", "per_page": 5}
-            res = requests.get(url, headers=headers, params=params, timeout=10, verify=False)
+            res = requests.get(url, headers=headers, params=params, timeout=10)
             res.raise_for_status()
             issues = res.json()
             results = []
@@ -133,7 +129,7 @@ def github_read(operation: str, owner: str, repo: str, path: Optional[str] = Non
             params = {"per_page": 5}
             if path:
                 params["path"] = path
-            res = requests.get(url, headers=headers, params=params, timeout=10, verify=False)
+            res = requests.get(url, headers=headers, params=params, timeout=10)
             res.raise_for_status()
             commits = res.json()
             results = []
