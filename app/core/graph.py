@@ -8,8 +8,7 @@ from typing import TypedDict, List, Dict, Any, Optional
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-import httpx
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 
 from core.retriever import retrieve
@@ -29,44 +28,20 @@ if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
     except Exception as e:
         print(f"[Config] Langfuse init failed ({e}). Tracing disabled.")
 
-CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.2")
-chat_model = ChatOllama(model=CHAT_MODEL)
-
-# Judge uses Groq (free tier) when GROQ_API_KEY is set, otherwise falls back to Ollama.
-# Uses httpx with verify=False to match the SSL bypass used for Tavily and GitHub.
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# Both models run on Groq's free tier: a fast small model for routing/generation,
+# a larger model for stricter answer evaluation.
+CHAT_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant")
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "llama-3.3-70b-versatile")
 
-_groq_client = None
-_judge_ollama = None
-
-if GROQ_API_KEY:
-    try:
-        from groq import Groq as _GroqClient
-        _groq_client = _GroqClient(
-            api_key=GROQ_API_KEY,
-            http_client=httpx.Client(verify=False)
-        )
-        print(f"[Config] Judge model: Groq ({JUDGE_MODEL})")
-    except Exception as e:
-        print(f"[Config] Groq init failed ({e}). Falling back to Ollama.")
-
-if _groq_client is None:
-    _fallback = os.getenv("JUDGE_MODEL", CHAT_MODEL)
-    _judge_ollama = ChatOllama(model=_fallback)
-    print(f"[Config] Judge model: Ollama ({_fallback})")
+chat_model = ChatGroq(model=CHAT_MODEL, temperature=0)
+judge_model = ChatGroq(model=JUDGE_MODEL, temperature=0)
+print(f"[Config] Chat model: Groq ({CHAT_MODEL})")
+print(f"[Config] Judge model: Groq ({JUDGE_MODEL})")
 
 
 def _call_judge(prompt: str) -> str:
     """Invoke the judge LLM and return the raw text response."""
-    if _groq_client:
-        completion = _groq_client.chat.completions.create(
-            model=JUDGE_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        return completion.choices[0].message.content
-    return _judge_ollama.invoke([HumanMessage(content=prompt)]).content
+    return judge_model.invoke([HumanMessage(content=prompt)]).content
 
 
 # ── State Definition ──────────────────────────────────────────────────────────

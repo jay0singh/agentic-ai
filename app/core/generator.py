@@ -1,14 +1,14 @@
 import os
 from dotenv import load_dotenv
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 from core.graph import run_orchestrator
 
 load_dotenv()
 
-CHAT_MODEL = os.getenv("CHAT_MODEL", "llama3.2")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant")
 
-chat_model = ChatOllama(model=CHAT_MODEL)
+chat_model = ChatGroq(model=CHAT_MODEL, temperature=0)
 
 
 def generate_answer(query: str, context_chunks: list[str]) -> str:

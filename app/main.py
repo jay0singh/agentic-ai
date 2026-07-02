@@ -31,7 +31,7 @@ def ingest(file_path: str):
 
 
 def chat():
-    print("\n--- RAG CHATBOT (Powered by Ollama + llama3.2) ---")
+    print("\n--- RAG CHATBOT (Powered by Groq + Gemini embeddings) ---")
     print("Type your question and press Enter. Type 'exit' to quit.\n")
 
     while True:

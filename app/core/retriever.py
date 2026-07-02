@@ -2,7 +2,8 @@ import os
 import urllib.parse
 from dotenv import load_dotenv
 from langchain_postgres import PGEngine, PGVectorStore
-from langchain_ollama import OllamaEmbeddings
+
+from core.embeddings import get_embeddings
 
 load_dotenv()
 
@@ -14,7 +15,6 @@ DB_CONFIG = {
     "port":     os.getenv("DB_PORT"),
 }
 TABLE       = os.getenv("DB_TABLE")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 
 # Construct database connection URL (uses psycopg3 driver via 'psycopg')
 db_user = DB_CONFIG["user"]
@@ -36,11 +36,10 @@ def get_engine():
 
 def retrieve(query: str, top_k: int = 3) -> list[str]:
     engine = get_engine()
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL)
     vector_store = PGVectorStore.create_sync(
         engine=engine,
         table_name=TABLE,
-        embedding_service=embeddings,
+        embedding_service=get_embeddings(),
     )
 
     results = vector_store.similarity_search(query, k=top_k)

@@ -2,8 +2,9 @@ import os
 import urllib.parse
 from dotenv import load_dotenv
 from langchain_postgres import PGEngine, PGVectorStore
-from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
+
+from core.embeddings import get_embeddings, EMBED_MODEL, EMBED_DIM
 
 load_dotenv()
 
@@ -15,7 +16,6 @@ DB_CONFIG = {
     "port":     os.getenv("DB_PORT"),
 }
 TABLE       = os.getenv("DB_TABLE")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 
 # Construct database connection URL (uses psycopg3 driver via 'psycopg')
 db_user = DB_CONFIG["user"]
@@ -37,21 +37,21 @@ def get_engine():
 
 def get_vector_store():
     engine = get_engine()
-    embeddings = OllamaEmbeddings(model=EMBED_MODEL)
     return PGVectorStore.create_sync(
         engine=engine,
         table_name=TABLE,
-        embedding_service=embeddings,
+        embedding_service=get_embeddings(),
     )
 
 
 def setup_table():
     engine = get_engine()
     try:
-        # Initialize the pgvector table. nomic-embed-text generates 768-dimensional embeddings.
+        # Initialize the pgvector table. Vector size must match the Gemini
+        # embedding dimensionality configured in core.embeddings.
         engine.init_vectorstore_table(
             table_name=TABLE,
-            vector_size=768,
+            vector_size=EMBED_DIM,
         )
         print(f"Table '{TABLE}' is ready.")
     except Exception as e:
@@ -62,7 +62,7 @@ def setup_table():
 
 
 def embed_and_store(chunks: list[str]) -> None:
-    print(f"Embedding {len(chunks)} chunks using '{EMBED_MODEL}' via LangChain...")
+    print(f"Embedding {len(chunks)} chunks using '{EMBED_MODEL}' via Gemini API...")
     vector_store = get_vector_store()
 
     # Convert chunks to LangChain Document objects

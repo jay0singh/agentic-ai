@@ -16,7 +16,7 @@ from core.generator import run_orchestrator
 
 app = FastAPI(
     title="RAG Chatbot API",
-    description="Upload documents and query them using local LLMs via Ollama.",
+    description="Upload documents and query them using free cloud LLMs (Groq + Gemini embeddings).",
     version="1.0.0"
 )
 

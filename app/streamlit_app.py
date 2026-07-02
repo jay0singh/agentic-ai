@@ -97,7 +97,7 @@ with st.sidebar:
                 r = requests.post(
                     f"{API_BASE}/ingest",
                     files={"file": (uploaded.name, uploaded.getvalue(), uploaded.type)},
-                    timeout=60
+                    timeout=600
                 )
                 if r.status_code == 200:
                     d = r.json()
