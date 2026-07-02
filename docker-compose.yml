@@ -14,5 +14,4 @@ services:
 
 volumes:
   pgvector_data:
-    external: true
-    name: 8a20fe419f9cb5056efc5b404d874108b1427012abea8bac2313d6d0b3c17ea1
+    name: pgvector_data
