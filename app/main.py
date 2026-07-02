@@ -3,9 +3,11 @@ import asyncio
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import pathlib
+
 from core.ingestor import load_document
 from core.chunker import chunk_text
-from core.embedder import setup_table, embed_and_store
+from core.embedder import setup_table, embed_and_store, delete_by_source
 from core.retriever import retrieve
 from core.generator import run_orchestrator
 
@@ -25,7 +27,11 @@ def ingest(file_path: str):
     setup_table()
 
     print("Step 4: Embedding and storing chunks...")
-    embed_and_store(chunks)
+    source = pathlib.Path(file_path).name
+    replaced = delete_by_source(source)
+    if replaced:
+        print(f"  Replacing {replaced} existing chunks for '{source}'.")
+    embed_and_store(chunks, source=source)
 
     print("\nIngestion complete! Run 'chat' mode to start querying.")
 

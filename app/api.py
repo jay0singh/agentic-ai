@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from core.ingestor import load_document
 from core.chunker import chunk_text
-from core.embedder import setup_table, embed_and_store
+from core.embedder import setup_table, embed_and_store, delete_by_source
 from core.retriever import retrieve
 from core.generator import run_orchestrator
 
@@ -67,10 +67,14 @@ def health():
 
 
 @app.post("/ingest")
-async def ingest(file: UploadFile = File(...)):
+def ingest(file: UploadFile = File(...)):
     """
     Upload a .pdf or .docx file.
     Extracts text, chunks it, embeds it, and stores in pgvector.
+    Re-ingesting a file replaces its previously stored chunks.
+
+    Sync on purpose: FastAPI runs it in a threadpool, so slow embedding
+    (including free-tier rate-limit pauses) doesn't block the event loop.
     """
     # Validate file type
     filename = file.filename or ""
@@ -91,7 +95,10 @@ async def ingest(file: UploadFile = File(...)):
         text = load_document(tmp_path)
         chunks = chunk_text(text, chunk_size=500, overlap=50)
         setup_table()
-        embed_and_store(chunks)
+        replaced = delete_by_source(filename)
+        if replaced:
+            print(f"[Ingest] Replacing {replaced} existing chunks for '{filename}'.")
+        embed_and_store(chunks, source=filename)
     except Exception:
         # Log the full error server-side only — raw exception text can leak
         # connection strings or other internals to the client.
@@ -100,11 +107,17 @@ async def ingest(file: UploadFile = File(...)):
             status_code=500,
             detail="Ingestion failed. Check the server logs for details."
         )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
     return {
         "filename": filename,
         "characters_extracted": len(text),
         "chunks_stored": len(chunks),
+        "chunks_replaced": replaced,
         "message": "Document ingested successfully."
     }
 

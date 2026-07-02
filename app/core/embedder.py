@@ -1,5 +1,6 @@
 import os
 import urllib.parse
+import psycopg
 from dotenv import load_dotenv
 from langchain_postgres import PGEngine, PGVectorStore
 from langchain_core.documents import Document
@@ -61,11 +62,29 @@ def setup_table():
             raise e
 
 
-def embed_and_store(chunks: list[str]) -> None:
+def delete_by_source(source: str) -> int:
+    """Remove all chunks previously ingested from the given source file.
+
+    Returns the number of deleted rows. Lets a document be re-ingested
+    without duplicating its chunks in the vector store."""
+    try:
+        with psycopg.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f'DELETE FROM "{TABLE}" WHERE langchain_metadata->>%s = %s',
+                    ("source", source),
+                )
+                return cur.rowcount
+    except psycopg.errors.UndefinedTable:
+        return 0
+
+
+def embed_and_store(chunks: list[str], source: str = "unknown") -> None:
     print(f"Embedding {len(chunks)} chunks using '{EMBED_MODEL}' via Gemini API...")
     vector_store = get_vector_store()
 
-    # Convert chunks to LangChain Document objects
-    documents = [Document(page_content=chunk) for chunk in chunks]
+    # Convert chunks to LangChain Document objects, tagging each with its
+    # source file so re-ingesting the same file can replace old chunks.
+    documents = [Document(page_content=chunk, metadata={"source": source}) for chunk in chunks]
     vector_store.add_documents(documents)
     print("All chunks embedded and stored.")
