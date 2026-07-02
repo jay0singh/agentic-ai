@@ -1,3 +1,4 @@
+import uuid
 import streamlit as st
 import requests
 
@@ -77,6 +78,9 @@ def render_extras(sources: list, judge_log: list):
 # ── Session state ──────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "session_id" not in st.session_state:
+    # Groups this conversation's traces in Langfuse's Sessions view
+    st.session_state.session_id = str(uuid.uuid4())
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -111,6 +115,7 @@ with st.sidebar:
 
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
+        st.session_state.session_id = str(uuid.uuid4())
         st.rerun()
 
 # ── Chat history ───────────────────────────────────────────────────────────────
@@ -136,7 +141,7 @@ if prompt := st.chat_input("Ask me anything…"):
             try:
                 r = requests.post(
                     f"{API_BASE}/chat",
-                    json={"question": prompt},
+                    json={"question": prompt, "session_id": st.session_state.session_id},
                     timeout=600
                 )
                 if r.status_code == 200:

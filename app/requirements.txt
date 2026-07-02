@@ -17,4 +17,4 @@ psycopg[binary]
 docx2txt
 langchain-groq
 streamlit
-langfuse
+langfuse>=4.13,<5

@@ -744,7 +744,7 @@ workflow.add_edge(
 app = workflow.compile()
 
 
-def run_orchestrator(query: str) -> dict:
+def run_orchestrator(query: str, session_id: Optional[str] = None, user_id: Optional[str] = None) -> dict:
     """Helper method to invoke the compiled LangGraph model."""
     initial_state = {
         "query": query,
@@ -760,11 +760,23 @@ def run_orchestrator(query: str) -> dict:
         "rewritten_query": None,
         "judge_log": [],
     }
-    config = {}
-    if _langfuse_handler:
-        config = {
-            "callbacks": [_langfuse_handler],
-            "run_name": "rag-chat",
-            "metadata": {"langfuse_tags": ["rag-demo"]},
-        }
-    return app.invoke(initial_state, config=config)
+    if not _langfuse_handler:
+        return app.invoke(initial_state)
+
+    from langfuse import get_client, propagate_attributes
+
+    config = {"callbacks": [_langfuse_handler]}
+    attrs = {"trace_name": "rag-chat", "tags": ["rag-demo"]}
+    if session_id:
+        attrs["session_id"] = session_id
+    if user_id:
+        attrs["user_id"] = user_id
+
+    # Wrap the graph invocation in a root span so the trace input/output show the
+    # user's question and final answer instead of the full AgentState dict.
+    with propagate_attributes(**attrs):
+        with get_client().start_as_current_observation(as_type="span", name="rag-chat") as span:
+            span.set_trace_io(input={"question": query})
+            state = app.invoke(initial_state, config=config)
+            span.set_trace_io(output={"answer": state.get("response")})
+    return state

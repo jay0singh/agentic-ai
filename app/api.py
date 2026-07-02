@@ -3,8 +3,10 @@ import asyncio
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import os
 import shutil
 import tempfile
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
@@ -14,10 +16,24 @@ from core.embedder import setup_table, embed_and_store
 from core.retriever import retrieve
 from core.generator import run_orchestrator
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    # Flush any queued Langfuse events before the process exits so traces aren't lost.
+    if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+        try:
+            from langfuse import get_client
+            get_client().shutdown()
+        except Exception as e:
+            print(f"[Config] Langfuse shutdown failed: {e}")
+
+
 app = FastAPI(
     title="RAG Chatbot API",
     description="Upload documents and query them using free cloud LLMs (Groq + Gemini embeddings).",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 
@@ -26,6 +42,8 @@ app = FastAPI(
 class ChatRequest(BaseModel):
     question: str
     top_k: int = 3
+    session_id: str | None = None
+    user_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -93,7 +111,11 @@ def chat(request: ChatRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     try:
-        state = run_orchestrator(request.question)
+        state = run_orchestrator(
+            request.question,
+            session_id=request.session_id,
+            user_id=request.user_id,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
