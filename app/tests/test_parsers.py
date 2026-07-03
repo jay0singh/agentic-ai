@@ -26,6 +26,7 @@ class TestIsCasualQuery:
         "heyy",        # repeated letters collapse
         "hellooo",
         "Hey bot",     # greeting + short tail
+        "ok", "yes", "bye",
     ])
     def test_casual(self, query):
         assert is_casual_query(query) is True
@@ -35,6 +36,8 @@ class TestIsCasualQuery:
         "Who won the FIFA World Cup in 2022?",
         "Read the README for langchain-ai/langgraph",
         "How many vacation days do employees get?",
+        "GDP",   # short but substantive — must NOT skip retrieval
+        "CPU?",
     ])
     def test_not_casual(self, query):
         assert is_casual_query(query) is False

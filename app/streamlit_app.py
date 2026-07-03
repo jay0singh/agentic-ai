@@ -50,6 +50,18 @@ def render_steps(steps: list):
     st.markdown("".join(badges), unsafe_allow_html=True)
 
 
+def render_citations(citations: list):
+    """One caption line naming each cited document and how many chunks it contributed."""
+    if not citations:
+        return
+    counts: dict[str, int] = {}
+    for c in citations:
+        src = c.get("source", "unknown")
+        counts[src] = counts.get(src, 0) + 1
+    parts = [f"{src} ({n} chunk{'s' if n > 1 else ''})" for src, n in counts.items()]
+    st.caption("📄 Cited: " + " · ".join(parts))
+
+
 def api_online() -> bool:
     try:
         return requests.get(f"{API_BASE}/health", timeout=2).status_code == 200
@@ -128,6 +140,7 @@ for msg in st.session_state.messages:
             render_steps(msg["steps_taken"])
             if "hitl" in msg["steps_taken"]:
                 st.warning("Could not produce a satisfactory answer after multiple retries.")
+        render_citations(msg.get("citations", []))
         render_extras(msg.get("context_sources", []), msg.get("judge_log", []))
 
 # ── Input ──────────────────────────────────────────────────────────────────────
@@ -149,6 +162,7 @@ if prompt := st.chat_input("Ask me anything…"):
                     answer = data["answer"]
                     steps = data["steps_taken"]
                     sources = data.get("context_sources", [])
+                    citations = data.get("citations", [])
                     judge_log = data.get("judge_log", [])
 
                     st.markdown(answer)
@@ -157,6 +171,7 @@ if prompt := st.chat_input("Ask me anything…"):
                     if "hitl" in steps:
                         st.warning("Could not produce a satisfactory answer after multiple retries.")
 
+                    render_citations(citations)
                     render_extras(sources, judge_log)
 
                     st.session_state.messages.append({
@@ -164,6 +179,7 @@ if prompt := st.chat_input("Ask me anything…"):
                         "content": answer,
                         "steps_taken": steps,
                         "context_sources": sources,
+                        "citations": citations,
                         "judge_log": judge_log
                     })
                 else:

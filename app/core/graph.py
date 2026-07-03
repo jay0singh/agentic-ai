@@ -47,7 +47,9 @@ class AgentState(TypedDict):
     query: str
     original_query: str
     history: str
+    top_k: int
     context: List[str]
+    citations: List[Dict[str, Any]]
     steps_taken: List[str]
     steps_remaining: List[str]
     next_node: str
@@ -199,16 +201,20 @@ def is_casual_query(query: str) -> bool:
             collapsed += char
             
     greetings = {
-        "hey", "hello", "hi", "yo", "greetings", "good morning", "good afternoon", 
-        "good evening", "howdy", "sup", "what's up", "help", "exit", "quit", "thanks", "thank you"
+        "hey", "hello", "hi", "yo", "greetings", "good morning", "good afternoon",
+        "good evening", "howdy", "sup", "what's up", "help", "exit", "quit", "thanks", "thank you",
+        "ok", "okay", "yes", "no", "yep", "nope", "bye", "goodbye", "cool", "nice"
     }
-    
+
     collapsed_greetings = {
         "hey", "helo", "hi", "yo", "gretings", "god morning", "god afternoon",
-        "god evening", "howdy", "sup", "whats up", "help", "exit", "quit", "thanks", "thank you"
+        "god evening", "howdy", "sup", "whats up", "help", "exit", "quit", "thanks", "thank you",
+        "ok", "okay", "yes", "no", "yep", "nope", "bye", "godbye", "col", "nice"
     }
-    
-    if q in greetings or collapsed in collapsed_greetings or len(q) <= 3:
+
+    # Note: short-but-substantive queries ("GDP", "CPU") must NOT match here —
+    # only explicit greetings/acknowledgements skip retrieval.
+    if q in greetings or collapsed in collapsed_greetings:
         return True
         
     # Multi-word greeting check: e.g., "Hey bot", "Hello there"
@@ -408,17 +414,25 @@ def router_node(state: AgentState) -> dict:
 
 def vector_search_node(state: AgentState) -> dict:
     query = state["parameters"].get("search_query", state["query"])
-    print(f"  [Node] Running Vector Search for: '{query}'...")
-    chunks = retrieve(query, top_k=3)
-    
-    if chunks:
-        source_content = f"--- [Vector Search Result for '{query}'] ---\n" + "\n---\n".join(chunks)
+    top_k = state.get("top_k") or 3
+    print(f"  [Node] Running Vector Search for: '{query}' (top_k={top_k})...")
+    results = retrieve(query, top_k=top_k)
+
+    if results:
+        labeled = [f"[source: {r['source']}]\n{r['content']}" for r in results]
+        source_content = f"--- [Vector Search Result for '{query}'] ---\n" + "\n---\n".join(labeled)
         new_context = state["context"] + [source_content]
+        new_citations = state.get("citations", []) + [
+            {"source": r["source"], "distance": round(r["distance"], 3)} for r in results
+        ]
     else:
+        print("  [Node] No sufficiently relevant chunks found.")
         new_context = state["context"]
-        
+        new_citations = state.get("citations", [])
+
     return {
         "context": new_context,
+        "citations": new_citations,
         "next_node": "router"
     }
 
@@ -702,6 +716,7 @@ def rewrite_node(state: AgentState) -> dict:
     return {
         "query": rewritten_query,
         "context": [],
+        "citations": [],
         "steps_remaining": None,
         "parameters": {},
         "retry_count": state["retry_count"] + 1,
@@ -779,7 +794,12 @@ workflow.add_edge(
 app = workflow.compile()
 
 
-def run_orchestrator(query: str, session_id: Optional[str] = None, user_id: Optional[str] = None) -> dict:
+def run_orchestrator(
+    query: str,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    top_k: int = 3,
+) -> dict:
     """Helper method to invoke the compiled LangGraph model."""
     history = get_history(session_id)
     history_str = format_history(history)
@@ -794,7 +814,9 @@ def run_orchestrator(query: str, session_id: Optional[str] = None, user_id: Opti
         "query": resolved_query,
         "original_query": resolved_query,
         "history": history_str,
+        "top_k": max(1, min(top_k, 10)),
         "context": [],
+        "citations": [],
         "steps_taken": [],
         "steps_remaining": None,
         "next_node": "router",

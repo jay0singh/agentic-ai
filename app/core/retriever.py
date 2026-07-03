@@ -16,6 +16,12 @@ DB_CONFIG = {
 }
 TABLE       = os.getenv("DB_TABLE")
 
+# Cosine distance cutoff (0 = identical, 2 = opposite). Matches scoring worse
+# than this are dropped so irrelevant chunks don't pollute the generator prompt.
+# Calibrated on gemini-embedding-001: on-topic queries score ~0.20-0.30,
+# off-topic ones ~0.48+.
+RETRIEVAL_MAX_DISTANCE = float(os.getenv("RETRIEVAL_MAX_DISTANCE", "0.42"))
+
 # Construct database connection URL (uses psycopg3 driver via 'psycopg')
 db_user = DB_CONFIG["user"]
 db_pass = urllib.parse.quote_plus(DB_CONFIG["password"] or "")
@@ -34,7 +40,9 @@ def get_engine():
     return _engine
 
 
-def retrieve(query: str, top_k: int = 3) -> list[str]:
+def retrieve(query: str, top_k: int = 3) -> list[dict]:
+    """Return up to top_k chunks as dicts with content, source filename and
+    cosine distance, dropping weak matches above RETRIEVAL_MAX_DISTANCE."""
     engine = get_engine()
     vector_store = PGVectorStore.create_sync(
         engine=engine,
@@ -42,5 +50,16 @@ def retrieve(query: str, top_k: int = 3) -> list[str]:
         embedding_service=get_embeddings(),
     )
 
-    results = vector_store.similarity_search(query, k=top_k)
-    return [doc.page_content for doc in results]
+    results = vector_store.similarity_search_with_score(query, k=top_k)
+    chunks = []
+    for doc, distance in results:
+        if distance > RETRIEVAL_MAX_DISTANCE:
+            print(f"  [Retriever] Dropped weak match (distance {distance:.3f} > {RETRIEVAL_MAX_DISTANCE:.2f}).")
+            continue
+        metadata = doc.metadata or {}
+        chunks.append({
+            "content": doc.page_content,
+            "source": metadata.get("source", "unknown"),
+            "distance": float(distance),
+        })
+    return chunks

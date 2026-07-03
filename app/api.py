@@ -9,7 +9,7 @@ import tempfile
 import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from core.ingestor import load_document
 from core.chunker import chunk_text
@@ -42,7 +42,7 @@ app = FastAPI(
 
 class ChatRequest(BaseModel):
     question: str
-    top_k: int = 3
+    top_k: int = Field(3, ge=1, le=10, description="How many document chunks to retrieve")
     session_id: str | None = None
     user_id: str | None = None
 
@@ -52,6 +52,7 @@ class ChatResponse(BaseModel):
     answer: str
     steps_taken: list[str]
     context_sources: list[str]
+    citations: list[dict]
     judge_log: list[str]
 
 class HealthResponse(BaseModel):
@@ -135,6 +136,7 @@ def chat(request: ChatRequest):
             request.question,
             session_id=request.session_id,
             user_id=request.user_id,
+            top_k=request.top_k,
         )
     except Exception:
         print(f"[Chat] Failed to answer question:\n{traceback.format_exc()}")
@@ -148,5 +150,6 @@ def chat(request: ChatRequest):
         "answer": state.get("response", "No response generated."),
         "steps_taken": state.get("steps_taken", []),
         "context_sources": state.get("context", []),
+        "citations": state.get("citations", []),
         "judge_log": state.get("judge_log", [])
     }

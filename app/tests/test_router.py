@@ -49,6 +49,37 @@ class TestRouterNode:
         assert result["parameters"]["search_query"] == "Something substantive here"
 
 
+class TestVectorSearchNode:
+    def test_uses_top_k_and_collects_citations(self, monkeypatch):
+        calls = {}
+
+        def fake_retrieve(query, top_k=3):
+            calls["top_k"] = top_k
+            return [
+                {"content": "chunk one", "source": "handbook.docx", "distance": 0.21},
+                {"content": "chunk two", "source": "handbook.docx", "distance": 0.25},
+            ]
+
+        monkeypatch.setattr(graph, "retrieve", fake_retrieve)
+        state = make_state("q", top_k=7, parameters={"search_query": "return policy"})
+        result = graph.vector_search_node(state)
+
+        assert calls["top_k"] == 7
+        assert result["citations"] == [
+            {"source": "handbook.docx", "distance": 0.21},
+            {"source": "handbook.docx", "distance": 0.25},
+        ]
+        assert "[source: handbook.docx]" in result["context"][0]
+        assert result["next_node"] == "router"
+
+    def test_no_relevant_chunks_leaves_state_unchanged(self, monkeypatch):
+        monkeypatch.setattr(graph, "retrieve", lambda query, top_k=3: [])
+        state = make_state("q", parameters={"search_query": "x"})
+        result = graph.vector_search_node(state)
+        assert result["context"] == []
+        assert result["citations"] == []
+
+
 class TestResolveFollowup:
     def test_rewrites_followup(self, monkeypatch):
         monkeypatch.setattr(
