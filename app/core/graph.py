@@ -11,6 +11,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
 
 from core.retriever import retrieve
+from core.memory import add_turn, get_history, format_history
 
 load_dotenv()
 
@@ -45,6 +46,7 @@ def _call_judge(prompt: str) -> str:
 class AgentState(TypedDict):
     query: str
     original_query: str
+    history: str
     context: List[str]
     steps_taken: List[str]
     steps_remaining: List[str]
@@ -220,6 +222,35 @@ def is_casual_query(query: str) -> bool:
             return True
             
     return False
+
+
+def resolve_followup(query: str, history_str: str) -> str:
+    """Rewrite a follow-up question into a standalone one using the conversation
+    history, so routing and retrieval work without the missing context."""
+    prompt = f"""Given a conversation history and a follow-up user question, rewrite the question so it is fully standalone and understandable without the history.
+
+Rules:
+- Resolve pronouns and references ("it", "that", "there", "what about X") using the history.
+- Keep the user's intent exactly — do not answer the question, only rewrite it.
+- If the question is already standalone, return it unchanged.
+- Output ONLY the rewritten question, nothing else.
+
+CONVERSATION HISTORY:
+{history_str}
+
+FOLLOW-UP QUESTION: {query}
+
+STANDALONE QUESTION:"""
+    try:
+        response = chat_model.invoke([HumanMessage(content=prompt)])
+        resolved = response.content.strip().strip('"')
+        if resolved:
+            if resolved != query:
+                print(f"  [Memory] Follow-up resolved to: '{resolved}'")
+            return resolved
+    except Exception as e:
+        print(f"  [Memory] Follow-up resolution failed ({e}). Using original query.")
+    return query
 
 
 def classify_query(query: str) -> dict:
@@ -437,11 +468,19 @@ def github_read_node(state: AgentState) -> dict:
 
 def generator_node(state: AgentState) -> dict:
     print("  [Node] Synthesizing final answer...")
-    
+
+    # Recent conversation turns (empty string when this is the first question)
+    history_block = ""
+    if state.get("history"):
+        history_block = f"""
+CONVERSATION SO FAR (for context — the question may refer back to it):
+{state["history"]}
+"""
+
     if not state.get("context"):
         # Respond directly if no context was retrieved (e.g. greetings, casual chat)
         prompt = f"""You are a helpful assistant. Respond to the user's input directly.
-
+{history_block}
 USER INPUT:
 {state["query"]}
 
@@ -456,7 +495,7 @@ If the context contains issues or PRs, list them clearly.
 
 FETCHED GITHUB CONTENT:
 {context_str}
-
+{history_block}
 USER REQUEST:
 {state["query"]}
 
@@ -476,7 +515,7 @@ Context retrieved from search tools is provided below. Use it as follows:
 
 ACCUMULATED CONTEXT:
 {context_str}
-
+{history_block}
 USER QUESTION:
 {state["query"]}
 
@@ -742,9 +781,19 @@ app = workflow.compile()
 
 def run_orchestrator(query: str, session_id: Optional[str] = None, user_id: Optional[str] = None) -> dict:
     """Helper method to invoke the compiled LangGraph model."""
+    history = get_history(session_id)
+    history_str = format_history(history)
+
+    # Rewrite follow-up questions ("what about X?") into standalone ones so the
+    # router and retrieval see the full intent, not a fragment.
+    resolved_query = query
+    if history and not is_casual_query(query):
+        resolved_query = resolve_followup(query, history_str)
+
     initial_state = {
-        "query": query,
-        "original_query": query,
+        "query": resolved_query,
+        "original_query": resolved_query,
+        "history": history_str,
         "context": [],
         "steps_taken": [],
         "steps_remaining": None,
@@ -757,7 +806,9 @@ def run_orchestrator(query: str, session_id: Optional[str] = None, user_id: Opti
         "judge_log": [],
     }
     if not _langfuse_handler:
-        return app.invoke(initial_state)
+        state = app.invoke(initial_state)
+        add_turn(session_id, query, state.get("response"))
+        return state
 
     from langfuse import get_client, propagate_attributes
 
@@ -770,9 +821,15 @@ def run_orchestrator(query: str, session_id: Optional[str] = None, user_id: Opti
 
     # Wrap the graph invocation in a root span so the trace input/output show the
     # user's question and final answer instead of the full AgentState dict.
+    trace_input = {"question": query}
+    if resolved_query != query:
+        trace_input["resolved_question"] = resolved_query
+
     with propagate_attributes(**attrs):
         with get_client().start_as_current_observation(as_type="span", name="rag-chat") as span:
-            span.set_trace_io(input={"question": query})
+            span.set_trace_io(input=trace_input)
             state = app.invoke(initial_state, config=config)
             span.set_trace_io(output={"answer": state.get("response")})
+
+    add_turn(session_id, query, state.get("response"))
     return state

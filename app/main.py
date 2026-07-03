@@ -4,6 +4,7 @@ if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import pathlib
+import uuid
 
 from core.ingestor import load_document
 from core.chunker import chunk_text
@@ -40,6 +41,9 @@ def chat():
     print("\n--- RAG CHATBOT (Powered by Groq + Gemini embeddings) ---")
     print("Type your question and press Enter. Type 'exit' to quit.\n")
 
+    # One conversation per CLI run — enables follow-up questions
+    session_id = str(uuid.uuid4())
+
     while True:
         query = input("You: ").strip()
 
@@ -50,7 +54,7 @@ def chat():
             break
 
         print("Orchestrator analyzing and routing query...")
-        state = run_orchestrator(query)
+        state = run_orchestrator(query, session_id=session_id)
 
         # Display the steps taken by the graph
         steps = " -> ".join(state.get("steps_taken", []))
