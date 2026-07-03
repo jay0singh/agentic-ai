@@ -71,6 +71,37 @@ def test_ingest_rejects_unsupported_file_type(client):
     assert r.status_code == 400
 
 
+def test_list_documents(client, monkeypatch):
+    monkeypatch.setattr(api, "list_documents", lambda: [
+        {"source": "handbook.docx", "chunks": 117, "ingested_at": "2026-07-03T10:00:00+00:00"},
+    ])
+    r = client.get("/documents")
+    assert r.status_code == 200
+    docs = r.json()["documents"]
+    assert docs[0]["source"] == "handbook.docx"
+    assert docs[0]["chunks"] == 117
+
+
+def test_delete_document(client, monkeypatch):
+    captured = {}
+
+    def fake_delete(source):
+        captured["source"] = source
+        return 7
+
+    monkeypatch.setattr(api, "delete_by_source", fake_delete)
+    r = client.delete("/documents/handbook.docx")
+    assert r.status_code == 200
+    assert r.json()["chunks_deleted"] == 7
+    assert captured["source"] == "handbook.docx"
+
+
+def test_delete_missing_document_is_404(client, monkeypatch):
+    monkeypatch.setattr(api, "delete_by_source", lambda source: 0)
+    r = client.delete("/documents/nope.docx")
+    assert r.status_code == 404
+
+
 def test_chat_stream_emits_sse_events(client, monkeypatch):
     def fake_stream(question, session_id=None, user_id=None, top_k=3):
         yield {"type": "token", "content": "Hel"}

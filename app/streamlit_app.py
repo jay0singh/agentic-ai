@@ -1,5 +1,7 @@
 import json
 import uuid
+from urllib.parse import quote
+
 import streamlit as st
 import requests
 
@@ -132,6 +134,33 @@ with st.sidebar:
                     st.error(r.json().get("detail", r.text))
             except Exception as e:
                 st.error(f"Connection error: {e}")
+
+    st.divider()
+
+    st.subheader("🗂️ Ingested Documents")
+    try:
+        doc_list = requests.get(f"{API_BASE}/documents", timeout=5).json().get("documents", [])
+    except Exception:
+        doc_list = None
+
+    if doc_list is None:
+        st.caption("Could not load the document list.")
+    elif not doc_list:
+        st.caption("No documents ingested yet.")
+    else:
+        for doc in doc_list:
+            name_col, del_col = st.columns([5, 1])
+            date = (doc.get("ingested_at") or "")[:10]
+            detail = f"{doc['chunks']} chunks" + (f" · {date}" if date else "")
+            name_col.markdown(f"**{doc['source']}**  \n<small>{detail}</small>", unsafe_allow_html=True)
+            if del_col.button("🗑️", key=f"del-{doc['source']}", help=f"Delete {doc['source']}"):
+                try:
+                    r = requests.delete(f"{API_BASE}/documents/{quote(doc['source'], safe='')}", timeout=30)
+                    if r.status_code != 200:
+                        st.error(r.json().get("detail", r.text))
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
 
     st.divider()
 

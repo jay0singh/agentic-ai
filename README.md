@@ -148,6 +148,7 @@ The UI opens automatically at `http://localhost:8501`.
 - Conversation memory — follow-up questions are resolved against the session ("does it cost anything?" after a return-policy question just works); Clear Chat starts a fresh session
 - Citation captions under every answer showing which documents (and how many chunks) were used
 - Document upload and ingestion (PDF / DOCX) from the sidebar; re-uploading a file replaces its chunks
+- Document manager in the sidebar — see every ingested document (chunk count, date) and delete with one click
 - Step badges on every response showing exactly which tools ran (`🔍 vector_search`, `🌐 web_search`, `⚖️ judge`, etc.)
 - Judge reasoning and retrieved sources in expandable panels
 - HITL warning shown inline when the judge could not get a satisfactory answer after max retries
@@ -185,6 +186,22 @@ Response:
 ```
 
 > **Note on the free tier:** Gemini's free tier allows 100 embedding requests per minute. Documents that produce more than ~50 chunks are embedded in batches with an automatic pause between them, so a large ingest can take a couple of minutes — this is expected, not a hang.
+
+---
+
+### `GET /documents`
+List ingested documents with chunk counts and ingest timestamps.
+
+```bash
+curl http://127.0.0.1:8000/documents
+```
+
+### `DELETE /documents/{filename}`
+Remove all stored chunks for one document (404 if it doesn't exist).
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/documents/NimbusCart_Policy_Handbook.docx
+```
 
 ---
 

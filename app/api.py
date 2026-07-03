@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from core.ingestor import load_document
 from core.chunker import chunk_text
-from core.embedder import setup_table, embed_and_store, delete_by_source
+from core.embedder import setup_table, embed_and_store, delete_by_source, list_documents
 from core.retriever import retrieve
 from core.generator import run_orchestrator
 from core.graph import stream_orchestrator
@@ -123,6 +123,41 @@ def ingest(file: UploadFile = File(...)):
         "chunks_stored": len(chunks),
         "chunks_replaced": replaced,
         "message": "Document ingested successfully."
+    }
+
+
+@app.get("/documents")
+def documents():
+    """List ingested documents with chunk counts and ingest timestamps."""
+    try:
+        return {"documents": list_documents()}
+    except Exception:
+        print(f"[Documents] Failed to list documents:\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not list documents. Check the server logs for details."
+        )
+
+
+@app.delete("/documents/{filename}")
+def delete_document(filename: str):
+    """Remove all stored chunks for one ingested document."""
+    try:
+        deleted = delete_by_source(filename)
+    except Exception:
+        print(f"[Documents] Failed to delete '{filename}':\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not delete the document. Check the server logs for details."
+        )
+
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail=f"No document named '{filename}' found.")
+
+    return {
+        "filename": filename,
+        "chunks_deleted": deleted,
+        "message": "Document deleted."
     }
 
 

@@ -1,5 +1,7 @@
 import os
 import urllib.parse
+from datetime import datetime, timezone
+
 import psycopg
 from dotenv import load_dotenv
 from langchain_postgres import PGEngine, PGVectorStore
@@ -79,12 +81,34 @@ def delete_by_source(source: str) -> int:
         return 0
 
 
+def list_documents() -> list[dict]:
+    """Summarise ingested documents: source filename, chunk count, ingest time."""
+    try:
+        with psycopg.connect(**DB_CONFIG) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f'SELECT langchain_metadata->>%s, COUNT(*), MAX(langchain_metadata->>%s) '
+                    f'FROM "{TABLE}" GROUP BY 1 ORDER BY 1',
+                    ("source", "ingested_at"),
+                )
+                return [
+                    {"source": source or "unknown", "chunks": chunks, "ingested_at": ingested_at}
+                    for source, chunks, ingested_at in cur.fetchall()
+                ]
+    except psycopg.errors.UndefinedTable:
+        return []
+
+
 def embed_and_store(chunks: list[str], source: str = "unknown") -> None:
     print(f"Embedding {len(chunks)} chunks using '{EMBED_MODEL}' via Gemini API...")
     vector_store = get_vector_store()
 
     # Convert chunks to LangChain Document objects, tagging each with its
-    # source file so re-ingesting the same file can replace old chunks.
-    documents = [Document(page_content=chunk, metadata={"source": source}) for chunk in chunks]
+    # source file (so re-ingesting can replace old chunks) and ingest time.
+    ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    documents = [
+        Document(page_content=chunk, metadata={"source": source, "ingested_at": ingested_at})
+        for chunk in chunks
+    ]
     vector_store.add_documents(documents)
     print("All chunks embedded and stored.")
