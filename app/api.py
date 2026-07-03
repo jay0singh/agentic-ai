@@ -3,12 +3,14 @@ import asyncio
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+import json
 import os
 import shutil
 import tempfile
 import traceback
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.ingestor import load_document
@@ -16,6 +18,7 @@ from core.chunker import chunk_text
 from core.embedder import setup_table, embed_and_store, delete_by_source
 from core.retriever import retrieve
 from core.generator import run_orchestrator
+from core.graph import stream_orchestrator
 
 
 @asynccontextmanager
@@ -153,3 +156,29 @@ def chat(request: ChatRequest):
         "citations": state.get("citations", []),
         "judge_log": state.get("judge_log", [])
     }
+
+
+@app.post("/chat/stream")
+def chat_stream(request: ChatRequest):
+    """
+    Ask a question and stream the answer as Server-Sent Events.
+    Events: {"type": "token"|"retry"|"done"|"error", ...} — "done" carries the
+    same fields as the non-streaming /chat response.
+    """
+    if not request.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+
+    def event_source():
+        try:
+            for event in stream_orchestrator(
+                request.question,
+                session_id=request.session_id,
+                user_id=request.user_id,
+                top_k=request.top_k,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception:
+            print(f"[Chat/stream] Failed to answer question:\n{traceback.format_exc()}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Failed to generate an answer. Check the server logs for details.'})}\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")

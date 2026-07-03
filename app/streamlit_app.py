@@ -1,3 +1,4 @@
+import json
 import uuid
 import streamlit as st
 import requests
@@ -60,6 +61,15 @@ def render_citations(citations: list):
         counts[src] = counts.get(src, 0) + 1
     parts = [f"{src} ({n} chunk{'s' if n > 1 else ''})" for src, n in counts.items()]
     st.caption("📄 Cited: " + " · ".join(parts))
+
+
+def stream_chat_events(payload: dict):
+    """Yield parsed SSE events from the streaming chat endpoint."""
+    with requests.post(f"{API_BASE}/chat/stream", json=payload, stream=True, timeout=600) as r:
+        r.raise_for_status()
+        for line in r.iter_lines(decode_unicode=True):
+            if line and line.startswith("data: "):
+                yield json.loads(line[len("data: "):])
 
 
 def api_online() -> bool:
@@ -150,48 +160,58 @@ if prompt := st.chat_input("Ask me anything…"):
         st.markdown(prompt)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking…"):
-            try:
-                r = requests.post(
-                    f"{API_BASE}/chat",
-                    json={"question": prompt, "session_id": st.session_state.session_id},
-                    timeout=600
-                )
-                if r.status_code == 200:
-                    data = r.json()
-                    answer = data["answer"]
-                    steps = data["steps_taken"]
-                    sources = data.get("context_sources", [])
-                    citations = data.get("citations", [])
-                    judge_log = data.get("judge_log", [])
+        placeholder = st.empty()
+        placeholder.markdown("*Routing and retrieving…*")
+        streamed_text = ""
+        final = None
+        error = None
 
-                    st.markdown(answer)
-                    render_steps(steps)
+        try:
+            for event in stream_chat_events(
+                {"question": prompt, "session_id": st.session_state.session_id}
+            ):
+                if event["type"] == "token":
+                    streamed_text += event["content"]
+                    placeholder.markdown(streamed_text + "▌")
+                elif event["type"] == "retry":
+                    streamed_text = ""
+                    placeholder.markdown("*⚖️ Judge requested a better answer — retrying…*")
+                elif event["type"] == "done":
+                    final = event
+                elif event["type"] == "error":
+                    error = event["message"]
+        except requests.exceptions.Timeout:
+            error = "Request timed out. The pipeline may still be running — try again."
+        except Exception as e:
+            error = f"Connection error: {e}"
 
-                    if "hitl" in steps:
-                        st.warning("Could not produce a satisfactory answer after multiple retries.")
+        if error or final is None:
+            message = f"Error: {error or 'The stream ended unexpectedly.'}"
+            placeholder.error(message)
+            st.session_state.messages.append(
+                {"role": "assistant", "content": message, "steps_taken": []}
+            )
+        else:
+            answer = final.get("answer") or streamed_text
+            steps = final.get("steps_taken", [])
+            sources = final.get("context_sources", [])
+            citations = final.get("citations", [])
+            judge_log = final.get("judge_log", [])
 
-                    render_citations(citations)
-                    render_extras(sources, judge_log)
+            placeholder.markdown(answer)
+            render_steps(steps)
 
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": answer,
-                        "steps_taken": steps,
-                        "context_sources": sources,
-                        "citations": citations,
-                        "judge_log": judge_log
-                    })
-                else:
-                    err = r.json().get("detail", r.text)
-                    st.error(f"Error: {err}")
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"Error: {err}",
-                        "steps_taken": []
-                    })
+            if "hitl" in steps:
+                st.warning("Could not produce a satisfactory answer after multiple retries.")
 
-            except requests.exceptions.Timeout:
-                st.error("Request timed out. The pipeline may still be running — try again.")
-            except Exception as e:
-                st.error(f"Connection error: {e}")
+            render_citations(citations)
+            render_extras(sources, judge_log)
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer,
+                "steps_taken": steps,
+                "context_sources": sources,
+                "citations": citations,
+                "judge_log": judge_log
+            })

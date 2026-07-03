@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -67,3 +69,40 @@ def test_chat_internal_error_is_generic(client, monkeypatch):
 def test_ingest_rejects_unsupported_file_type(client):
     r = client.post("/ingest", files={"file": ("notes.txt", b"hello", "text/plain")})
     assert r.status_code == 400
+
+
+def test_chat_stream_emits_sse_events(client, monkeypatch):
+    def fake_stream(question, session_id=None, user_id=None, top_k=3):
+        yield {"type": "token", "content": "Hel"}
+        yield {"type": "token", "content": "lo"}
+        yield {"type": "done", "answer": "Hello", "steps_taken": ["generate", "judge"],
+               "context_sources": [], "citations": [], "judge_log": []}
+
+    monkeypatch.setattr(api, "stream_orchestrator", fake_stream)
+
+    with client.stream("POST", "/chat/stream", json={"question": "hi there"}) as r:
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        events = [json.loads(line[len("data: "):])
+                  for line in r.iter_lines() if line.startswith("data: ")]
+
+    assert [e["type"] for e in events] == ["token", "token", "done"]
+    assert events[-1]["answer"] == "Hello"
+
+
+def test_chat_stream_empty_question_is_400(client):
+    r = client.post("/chat/stream", json={"question": "  "})
+    assert r.status_code == 400
+
+
+def test_chat_stream_internal_error_becomes_error_event(client, monkeypatch):
+    def broken_stream(*args, **kwargs):
+        raise RuntimeError("postgresql://user:secret@host/db exploded")
+        yield  # pragma: no cover — makes this a generator
+
+    monkeypatch.setattr(api, "stream_orchestrator", broken_stream)
+
+    with client.stream("POST", "/chat/stream", json={"question": "hi"}) as r:
+        body = "".join(r.iter_text())
+    assert '"type": "error"' in body.replace("'", '"') or '"error"' in body
+    assert "secret" not in body

@@ -794,23 +794,19 @@ workflow.add_edge(
 app = workflow.compile()
 
 
-def run_orchestrator(
-    query: str,
-    session_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    top_k: int = 3,
-) -> dict:
-    """Helper method to invoke the compiled LangGraph model."""
+def _resolve_query(query: str, session_id: Optional[str]) -> tuple[str, str]:
+    """Fetch session history and rewrite follow-up questions ("what about X?")
+    into standalone ones so the router and retrieval see the full intent."""
     history = get_history(session_id)
     history_str = format_history(history)
-
-    # Rewrite follow-up questions ("what about X?") into standalone ones so the
-    # router and retrieval see the full intent, not a fragment.
     resolved_query = query
     if history and not is_casual_query(query):
         resolved_query = resolve_followup(query, history_str)
+    return resolved_query, history_str
 
-    initial_state = {
+
+def _initial_state(resolved_query: str, history_str: str, top_k: int) -> dict:
+    return {
         "query": resolved_query,
         "original_query": resolved_query,
         "history": history_str,
@@ -827,6 +823,18 @@ def run_orchestrator(
         "rewritten_query": None,
         "judge_log": [],
     }
+
+
+def run_orchestrator(
+    query: str,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    top_k: int = 3,
+) -> dict:
+    """Helper method to invoke the compiled LangGraph model."""
+    resolved_query, history_str = _resolve_query(query, session_id)
+    initial_state = _initial_state(resolved_query, history_str, top_k)
+
     if not _langfuse_handler:
         state = app.invoke(initial_state)
         add_turn(session_id, query, state.get("response"))
@@ -855,3 +863,54 @@ def run_orchestrator(
 
     add_turn(session_id, query, state.get("response"))
     return state
+
+
+def stream_orchestrator(
+    query: str,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    top_k: int = 3,
+):
+    """Run the graph while yielding streaming events for SSE clients:
+
+    - {"type": "token", "content": ...}   generator tokens as they are produced
+    - {"type": "retry", "reason": ...}    judge rejected the answer; a new attempt follows
+    - {"type": "done", ...}               final answer with steps/citations/judge log
+    """
+    resolved_query, history_str = _resolve_query(query, session_id)
+    initial_state = _initial_state(resolved_query, history_str, top_k)
+
+    config = {}
+    if _langfuse_handler:
+        metadata = {"langfuse_tags": ["rag-demo"]}
+        if session_id:
+            metadata["langfuse_session_id"] = session_id
+        if user_id:
+            metadata["langfuse_user_id"] = user_id
+        config = {"callbacks": [_langfuse_handler], "run_name": "rag-chat", "metadata": metadata}
+
+    final_state = initial_state
+    for mode, payload in app.stream(initial_state, config=config, stream_mode=["messages", "values"]):
+        if mode == "messages":
+            chunk, chunk_meta = payload
+            # Only forward tokens from the answer generator — router/classifier/
+            # judge LLM output is internal and must not reach the user.
+            if chunk_meta.get("langgraph_node") == "generator" and getattr(chunk, "content", ""):
+                yield {"type": "token", "content": chunk.content}
+        else:  # "values": a full state snapshot after each node
+            final_state = payload
+            steps = payload.get("steps_taken") or []
+            if payload.get("judge_decision") == "retry" and steps[-1:] == ["judge"]:
+                reason = (payload.get("judge_log") or [""])[-1]
+                yield {"type": "retry", "reason": reason}
+
+    add_turn(session_id, query, final_state.get("response"))
+    yield {
+        "type": "done",
+        "question": query,
+        "answer": final_state.get("response", "No response generated."),
+        "steps_taken": final_state.get("steps_taken", []),
+        "context_sources": final_state.get("context", []),
+        "citations": final_state.get("citations", []),
+        "judge_log": final_state.get("judge_log", []),
+    }
