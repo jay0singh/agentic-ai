@@ -63,6 +63,14 @@ def setup_table():
         else:
             raise e
 
+    # Full-text index used by the hybrid (keyword) half of retrieval.
+    with psycopg.connect(**DB_CONFIG) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'CREATE INDEX IF NOT EXISTS "{TABLE}_content_fts" ON "{TABLE}" '
+                f"USING GIN (to_tsvector('english', content))"
+            )
+
 
 def delete_by_source(source: str) -> int:
     """Remove all chunks previously ingested from the given source file.

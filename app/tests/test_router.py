@@ -72,6 +72,14 @@ class TestVectorSearchNode:
         assert "[source: handbook.docx]" in result["context"][0]
         assert result["next_node"] == "router"
 
+    def test_keyword_only_match_has_null_distance_citation(self, monkeypatch):
+        monkeypatch.setattr(graph, "retrieve", lambda query, top_k=3: [
+            {"content": "chunk", "source": "handbook.docx", "distance": None},
+        ])
+        state = make_state("q", parameters={"search_query": "section 7.4"})
+        result = graph.vector_search_node(state)
+        assert result["citations"] == [{"source": "handbook.docx", "distance": None}]
+
     def test_no_relevant_chunks_leaves_state_unchanged(self, monkeypatch):
         monkeypatch.setattr(graph, "retrieve", lambda query, top_k=3: [])
         state = make_state("q", parameters={"search_query": "x"})

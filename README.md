@@ -9,6 +9,7 @@ A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluati
 - **Streaming answers** — tokens render live in the UI via an SSE endpoint (`/chat/stream`)
 - **Conversation memory** — follow-up questions ("does it cost anything?") are resolved against the session history before routing
 - **Source citations** — every retrieved chunk carries its source filename and similarity score; answers show what they cited
+- **Hybrid search** — vector similarity fused with Postgres full-text search via Reciprocal Rank Fusion, so exact-keyword queries ("section 7.4") match reliably
 - **Relevance threshold** — weak vector matches are dropped instead of polluting the prompt (`RETRIEVAL_MAX_DISTANCE`)
 - **LLM-as-judge loop** — a larger model grades each answer and triggers a retry with a rewritten query when it isn't grounded
 - **Langfuse tracing** — full traces per request with sessions, judge scores, and token usage (optional, free tier)
@@ -390,7 +391,7 @@ agentic-ai/
         ├── embeddings.py       # Gemini embeddings (swap provider here)
         ├── generator.py        # Legacy generator (used by api.py)
         ├── embedder.py         # Embedding and pgvector storage
-        ├── retriever.py        # Vector similarity search + relevance threshold
+        ├── retriever.py        # Hybrid search: vector + full-text, RRF-fused
         ├── ingestor.py         # PDF / DOCX text extraction
         └── chunker.py          # Text chunking
 ```

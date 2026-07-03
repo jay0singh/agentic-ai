@@ -423,7 +423,9 @@ def vector_search_node(state: AgentState) -> dict:
         source_content = f"--- [Vector Search Result for '{query}'] ---\n" + "\n---\n".join(labeled)
         new_context = state["context"] + [source_content]
         new_citations = state.get("citations", []) + [
-            {"source": r["source"], "distance": round(r["distance"], 3)} for r in results
+            {"source": r["source"],
+             "distance": round(r["distance"], 3) if r["distance"] is not None else None}
+            for r in results
         ]
     else:
         print("  [Node] No sufficiently relevant chunks found.")
