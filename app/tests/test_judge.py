@@ -72,14 +72,30 @@ class TestRewriteNode:
         assert result["retry_count"] == 1
         assert result["context"] == []
         assert result["steps_remaining"] is None
+        assert result["next_node"] == "router"
 
-    def test_identical_rewrite_accepts_to_avoid_loop(self):
+    def test_identical_rewrite_accepts_and_ends(self):
         state = make_state("same query", retry_count=0, rewritten_query="same query")
         result = graph.rewrite_node(state)
         assert result["judge_decision"] == "accept"
         assert "query" not in result
+        # Must END, not re-enter the router — regression test for the infinite
+        # generate -> judge -> rewrite loop when the judge repeats the query.
+        assert result["next_node"] == "end"
 
-    def test_max_retries_accepts(self):
+    def test_max_retries_accepts_and_ends(self):
         state = make_state("q", retry_count=3, rewritten_query="different")
         result = graph.rewrite_node(state)
         assert result["judge_decision"] == "accept"
+        assert result["next_node"] == "end"
+
+
+class TestRouteAfterRewrite:
+    def test_accept_and_stop_ends_graph(self):
+        assert graph.route_after_rewrite({"next_node": "end"}) == "end"
+
+    def test_genuine_retry_reenters_router(self):
+        assert graph.route_after_rewrite({"next_node": "router"}) == "router"
+
+    def test_missing_next_node_defaults_to_router(self):
+        assert graph.route_after_rewrite({}) == "router"

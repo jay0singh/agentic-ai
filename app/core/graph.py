@@ -700,16 +700,18 @@ RETRY format:
 def rewrite_node(state: AgentState) -> dict:
     steps_taken = state.get("steps_taken", [])
 
+    # When we accept instead of retrying, the graph must END with the current
+    # answer — routing back to the router would regenerate and re-judge the
+    # same answer forever (generate -> judge -> rewrite -> generate ...).
     if state["retry_count"] >= 3:
-        print("  [Rewrite] Max retries reached.")
-        return {"judge_decision": "accept", "steps_taken": steps_taken + ["rewrite"]}
+        print("  [Rewrite] Max retries reached. Keeping current answer.")
+        return {"judge_decision": "accept", "next_node": "end", "steps_taken": steps_taken + ["rewrite"]}
 
     rewritten_query = state.get("rewritten_query") or state["query"]
 
-    # Avoid an infinite loop if the judge returned an identical query
     if rewritten_query == state["query"]:
-        print("  [Rewrite] Rewritten query is identical to original. Accepting.")
-        return {"judge_decision": "accept", "steps_taken": steps_taken + ["rewrite"]}
+        print("  [Rewrite] Rewritten query is identical to original. Keeping current answer.")
+        return {"judge_decision": "accept", "next_node": "end", "steps_taken": steps_taken + ["rewrite"]}
 
     print(f"  [Rewrite] Retrying with query: {rewritten_query}")
 
@@ -718,6 +720,7 @@ def rewrite_node(state: AgentState) -> dict:
         "context": [],
         "citations": [],
         "steps_remaining": None,
+        "next_node": "router",
         "parameters": {},
         "retry_count": state["retry_count"] + 1,
         "response": None,
@@ -743,6 +746,14 @@ def route_after_judge(state):
             return "rewrite"
         return "hitl"
     return "end"
+
+
+def route_after_rewrite(state):
+    """A genuine retry goes back through the router; an 'accept and stop'
+    decision must end the graph with the current answer."""
+    if state.get("next_node") == "end":
+        return "end"
+    return "router"
 
 
 workflow = StateGraph(AgentState)
@@ -786,12 +797,20 @@ workflow.add_conditional_edges(
 
 workflow.add_edge("hitl", END)
 
-workflow.add_edge(
+workflow.add_conditional_edges(
     "rewrite",
-    "router"
+    route_after_rewrite,
+    {
+        "router": "router",
+        "end": END
+    }
 )
 
 app = workflow.compile()
+
+# Hard safety net: 3 retries with multiple tools stays well under this, so the
+# graph can never spin unbounded even if a future routing bug reintroduces a cycle.
+RECURSION_LIMIT = 60
 
 
 def _resolve_query(query: str, session_id: Optional[str]) -> tuple[str, str]:
@@ -836,13 +855,13 @@ def run_orchestrator(
     initial_state = _initial_state(resolved_query, history_str, top_k)
 
     if not _langfuse_handler:
-        state = app.invoke(initial_state)
+        state = app.invoke(initial_state, config={"recursion_limit": RECURSION_LIMIT})
         add_turn(session_id, query, state.get("response"))
         return state
 
     from langfuse import get_client, propagate_attributes
 
-    config = {"callbacks": [_langfuse_handler]}
+    config = {"callbacks": [_langfuse_handler], "recursion_limit": RECURSION_LIMIT}
     attrs = {"trace_name": "rag-chat", "tags": ["rag-demo"]}
     if session_id:
         attrs["session_id"] = session_id
@@ -880,14 +899,14 @@ def stream_orchestrator(
     resolved_query, history_str = _resolve_query(query, session_id)
     initial_state = _initial_state(resolved_query, history_str, top_k)
 
-    config = {}
+    config = {"recursion_limit": RECURSION_LIMIT}
     if _langfuse_handler:
         metadata = {"langfuse_tags": ["rag-demo"]}
         if session_id:
             metadata["langfuse_session_id"] = session_id
         if user_id:
             metadata["langfuse_user_id"] = user_id
-        config = {"callbacks": [_langfuse_handler], "run_name": "rag-chat", "metadata": metadata}
+        config.update({"callbacks": [_langfuse_handler], "run_name": "rag-chat", "metadata": metadata})
 
     final_state = initial_state
     for mode, payload in app.stream(initial_state, config=config, stream_mode=["messages", "values"]):
