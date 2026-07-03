@@ -1,6 +1,18 @@
 # RAG Demo — Agentic Retrieval-Augmented Generation
 
+[![CI](https://github.com/jay0singh/agentic-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/jay0singh/agentic-ai/actions/workflows/ci.yml)
+
 A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluation loop, and a Human-in-the-Loop (HITL) fallback. Built with FastAPI, PostgreSQL + pgvector, Streamlit, and **100% free cloud APIs**: Groq (chat + judge), Google Gemini (embeddings), and Tavily (web search). No local models required.
+
+**Highlights**
+
+- **Streaming answers** — tokens render live in the UI via an SSE endpoint (`/chat/stream`)
+- **Conversation memory** — follow-up questions ("does it cost anything?") are resolved against the session history before routing
+- **Source citations** — every retrieved chunk carries its source filename and similarity score; answers show what they cited
+- **Relevance threshold** — weak vector matches are dropped instead of polluting the prompt (`RETRIEVAL_MAX_DISTANCE`)
+- **LLM-as-judge loop** — a larger model grades each answer and triggers a retry with a rewritten query when it isn't grounded
+- **Langfuse tracing** — full traces per request with sessions, judge scores, and token usage (optional, free tier)
+- **Tested + CI** — 67 mocked-LLM tests run on every push via GitHub Actions
 
 ---
 
@@ -88,40 +100,13 @@ This starts a `pgvector-db` container on port 5433 with a persistent `pgvector_d
 
 ### 4. Configure environment variables
 
-Copy the example below into a `.env` file at the project root (`agentic-ai/.env`) and paste in your keys:
+Copy [`.env.example`](.env.example) to `.env` at the project root and paste in your keys:
 
-```env
-# PostgreSQL (matches the pgvector-db Docker container)
-DB_NAME=vectordb
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_HOST=localhost
-DB_PORT=5433
-DB_TABLE=documents
-
-# Groq (chat + judge, free tier) — https://console.groq.com/keys
-GROQ_API_KEY=your_groq_api_key_here
-
-# Google Gemini (embeddings, free tier) — https://aistudio.google.com/apikey
-GOOGLE_API_KEY=your_gemini_api_key_here
-
-# Models (all free-tier cloud models)
-CHAT_MODEL=llama-3.1-8b-instant
-JUDGE_MODEL=llama-3.3-70b-versatile
-EMBED_MODEL=models/gemini-embedding-001
-EMBED_DIM=768
-
-# Tavily (web search, optional) — https://tavily.com
-TAVILY_API_KEY=
-
-# GitHub (optional — raises API rate limits)
-GITHUB_TOKEN=
-
-# Langfuse (observability — optional, traces stay disabled if unset)
-LANGFUSE_PUBLIC_KEY=your_langfuse_public_key_here
-LANGFUSE_SECRET_KEY=your_langfuse_secret_key_here
-LANGFUSE_BASE_URL=http://localhost:3000
+```bash
+cp .env.example .env
 ```
+
+Required: `GROQ_API_KEY` (chat + judge) and `GOOGLE_API_KEY` (embeddings) — both free, no credit card. Optional: `TAVILY_API_KEY` (web search), `GITHUB_TOKEN` (higher GitHub rate limits), `LANGFUSE_*` (tracing), and `RETRIEVAL_MAX_DISTANCE` to tune how aggressively weak vector matches are dropped (default `0.42`; on-topic queries typically score 0.20–0.30 cosine distance, off-topic 0.48+).
 
 ---
 
@@ -159,13 +144,14 @@ streamlit run streamlit_app.py
 The UI opens automatically at `http://localhost:8501`.
 
 **Features:**
-- Chat interface with full conversation history
-- Document upload and ingestion (PDF / DOCX) from the sidebar
+- Streaming chat — answers render token-by-token as they are generated
+- Conversation memory — follow-up questions are resolved against the session ("does it cost anything?" after a return-policy question just works); Clear Chat starts a fresh session
+- Citation captions under every answer showing which documents (and how many chunks) were used
+- Document upload and ingestion (PDF / DOCX) from the sidebar; re-uploading a file replaces its chunks
 - Step badges on every response showing exactly which tools ran (`🔍 vector_search`, `🌐 web_search`, `⚖️ judge`, etc.)
 - Judge reasoning and retrieved sources in expandable panels
 - HITL warning shown inline when the judge could not get a satisfactory answer after max retries
 - API health indicator in the sidebar
-- Clear chat button
 
 ---
 
@@ -205,10 +191,12 @@ Response:
 ### `POST /chat`
 Ask a question. The system routes to the appropriate tools, generates an answer, evaluates it with the judge, and retries if needed.
 
+Optional request fields: `session_id` (enables conversation memory and groups Langfuse traces), `user_id`, and `top_k` (1–10, how many chunks to retrieve; default 3).
+
 ```bash
 curl -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "What is NimbusCart'\''s return policy?"}'
+  -d '{"question": "What is NimbusCart'\''s return policy?", "session_id": "my-session", "top_k": 3}'
 ```
 
 Response:
@@ -218,6 +206,7 @@ Response:
   "answer": "NimbusCart offers a 30-day return window...",
   "steps_taken": ["vector_search", "generate", "judge"],
   "context_sources": ["--- [Vector Search Result..."],
+  "citations": [{"source": "NimbusCart_Policy_Handbook.docx", "distance": 0.203}],
   "judge_log": ["ACCEPT: The answer is directly supported by the context."]
 }
 ```
@@ -236,11 +225,49 @@ Response:
 
 ---
 
+### `POST /chat/stream`
+Same request body as `/chat`, but the answer streams back as Server-Sent Events while it is being generated (this is what the Streamlit UI uses):
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question": "What is NimbusMarket?"}'
+```
+
+Each event is a JSON object:
+
+| Event `type` | Meaning |
+|---|---|
+| `token` | Next piece of the answer (`content`) |
+| `retry` | The judge rejected the draft answer; a new attempt follows (`reason`) |
+| `done` | Final payload — same fields as the `/chat` response |
+| `error` | Something failed; details are in the server log |
+
+---
+
+## Running the Tests
+
+67 unit and API tests run with all LLM calls mocked — no API keys, database, or network needed:
+
+```bash
+pip install -r app/requirements-dev.txt
+cd app
+pytest
+```
+
+The same suite runs automatically on every push and pull request via GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+---
+
 ## Observability with Langfuse
 
 Every `/chat` request is traced end-to-end (router → tools → generator → judge → rewrite/HITL) when Langfuse keys are set. Tracing is fully optional — if `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are unset, the app runs exactly as before with no Langfuse calls.
 
-### Run Langfuse locally
+### Option A — Langfuse Cloud (free Hobby tier, no containers)
+
+Sign up at [cloud.langfuse.com](https://cloud.langfuse.com), create a project, generate API keys under **Settings → API Keys**, and put them in `.env` with `LANGFUSE_BASE_URL=https://cloud.langfuse.com`.
+
+### Option B — Self-hosted
 
 ```bash
 git clone https://github.com/langfuse/langfuse.git
@@ -248,11 +275,12 @@ cd langfuse
 docker compose up -d
 ```
 
-Open `http://localhost:3000`, create a project, and copy the generated public/secret keys into your `.env` (see above).
+Open `http://localhost:3000`, create a project, and copy the generated public/secret keys into your `.env` with `LANGFUSE_BASE_URL=http://localhost:3000`. (Heavier: runs its own Postgres, ClickHouse, Redis, and MinIO containers.)
 
 ### What gets traced
 
-- A full trace per `/chat` call, named `rag-chat`, tagged `rag-demo`
+- A full trace per chat call, named `rag-chat`, tagged `rag-demo`, with the trace input/output set to the user's question and final answer (plus the resolved standalone question for follow-ups)
+- Sessions — passing `session_id` groups a whole conversation in Langfuse's Sessions view
 - Each LangGraph node (router, vector_search, web_search, github_read, generator, judge, rewrite, hitl) as a nested span, including LLM calls with prompts/completions and token usage
 - A `judge_decision` score (1 = accept, 0 = retry) with the judge's reasoning attached as a comment — lets you filter traces in the Langfuse UI by where the judge struggled
 
@@ -298,20 +326,26 @@ This produces two outputs:
 ```
 agentic-ai/
 ├── .env                        # Environment variables (not committed)
+├── .env.example                # Template — copy to .env and add your keys
+├── docker-compose.yml          # PostgreSQL + pgvector container
+├── .github/workflows/ci.yml   # CI: runs the test suite on every push
 ├── documents/                  # Sample documents for ingestion
 │   └── NimbusCart_Policy_Handbook.docx
 └── app/
-    ├── api.py                  # FastAPI routes (/health, /ingest, /chat)
-    ├── streamlit_app.py        # Streamlit chat frontend
+    ├── api.py                  # FastAPI routes (/health, /ingest, /chat, /chat/stream)
+    ├── streamlit_app.py        # Streamlit chat frontend (streaming, citations)
     ├── main.py                 # CLI entry point (ingest / chat modes)
     ├── generate_graph.py       # Graph visualisation script
     ├── requirements.txt        # Python dependencies
+    ├── requirements-dev.txt    # Test dependencies (pytest)
+    ├── tests/                  # 67 unit + API tests, all LLM calls mocked
     └── core/
         ├── graph.py            # LangGraph nodes and workflow (main logic)
+        ├── memory.py           # Per-session conversation memory
         ├── embeddings.py       # Gemini embeddings (swap provider here)
         ├── generator.py        # Legacy generator (used by api.py)
         ├── embedder.py         # Embedding and pgvector storage
-        ├── retriever.py        # Vector similarity search
+        ├── retriever.py        # Vector similarity search + relevance threshold
         ├── ingestor.py         # PDF / DOCX text extraction
         └── chunker.py          # Text chunking
 ```
