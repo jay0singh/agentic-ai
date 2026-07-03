@@ -119,7 +119,7 @@ with st.sidebar:
     st.divider()
 
     st.subheader("📄 Ingest Document")
-    uploaded = st.file_uploader("Upload a PDF or DOCX", type=["pdf", "docx"])
+    uploaded = st.file_uploader("Upload a document", type=["pdf", "docx", "txt", "md"])
     if uploaded and st.button("Ingest", use_container_width=True):
         with st.spinner("Ingesting…"):
             try:
@@ -131,6 +131,20 @@ with st.sidebar:
                 if r.status_code == 200:
                     d = r.json()
                     st.success(f"✅ {d['chunks_stored']} chunks stored from **{d['filename']}**")
+                else:
+                    st.error(r.json().get("detail", r.text))
+            except Exception as e:
+                st.error(f"Connection error: {e}")
+
+    url_to_ingest = st.text_input("Or ingest a web page", placeholder="https://example.com/article")
+    if url_to_ingest and st.button("Ingest URL", use_container_width=True):
+        with st.spinner("Fetching and ingesting…"):
+            try:
+                r = requests.post(f"{API_BASE}/ingest/url", json={"url": url_to_ingest}, timeout=600)
+                if r.status_code == 200:
+                    d = r.json()
+                    label = d.get("title") or d["url"]
+                    st.success(f"✅ {d['chunks_stored']} chunks stored from **{label}**")
                 else:
                     st.error(r.json().get("detail", r.text))
             except Exception as e:

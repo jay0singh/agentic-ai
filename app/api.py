@@ -13,7 +13,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from core.ingestor import load_document
+from core.ingestor import load_document, load_url, SUPPORTED_EXTENSIONS
 from core.chunker import chunk_text
 from core.embedder import setup_table, embed_and_store, delete_by_source, list_documents
 from core.retriever import retrieve
@@ -73,7 +73,7 @@ def health():
 @app.post("/ingest")
 def ingest(file: UploadFile = File(...)):
     """
-    Upload a .pdf or .docx file.
+    Upload a .pdf, .docx, .txt or .md file.
     Extracts text, chunks it, embeds it, and stores in pgvector.
     Re-ingesting a file replaces its previously stored chunks.
 
@@ -82,14 +82,14 @@ def ingest(file: UploadFile = File(...)):
     """
     # Validate file type
     filename = file.filename or ""
-    if not (filename.endswith(".pdf") or filename.endswith(".docx")):
+    suffix = os.path.splitext(filename)[1].lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail="Only .pdf and .docx files are supported."
+            detail=f"Only {', '.join(SUPPORTED_EXTENSIONS)} files are supported."
         )
 
     # Save uploaded file to a temp location so we can read it
-    suffix = ".pdf" if filename.endswith(".pdf") else ".docx"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
@@ -126,6 +126,53 @@ def ingest(file: UploadFile = File(...)):
     }
 
 
+class IngestUrlRequest(BaseModel):
+    url: str
+
+
+@app.post("/ingest/url")
+def ingest_url(request: IngestUrlRequest):
+    """
+    Fetch a web page, extract its text, chunk, embed and store it.
+    The URL itself is the document's source; re-ingesting replaces its chunks.
+    """
+    url = request.url.strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://.")
+
+    try:
+        title, text = load_url(url)
+    except Exception:
+        print(f"[Ingest/url] Failed to fetch '{url}':\n{traceback.format_exc()}")
+        raise HTTPException(status_code=400, detail="Could not fetch or read that URL.")
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="The page contained no readable text.")
+
+    try:
+        chunks = chunk_text(text, chunk_size=500, overlap=50)
+        setup_table()
+        replaced = delete_by_source(url)
+        if replaced:
+            print(f"[Ingest/url] Replacing {replaced} existing chunks for '{url}'.")
+        embed_and_store(chunks, source=url)
+    except Exception:
+        print(f"[Ingest/url] Failed for '{url}':\n{traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail="Ingestion failed. Check the server logs for details."
+        )
+
+    return {
+        "url": url,
+        "title": title,
+        "characters_extracted": len(text),
+        "chunks_stored": len(chunks),
+        "chunks_replaced": replaced,
+        "message": "Page ingested successfully."
+    }
+
+
 @app.get("/documents")
 def documents():
     """List ingested documents with chunk counts and ingest timestamps."""
@@ -139,9 +186,10 @@ def documents():
         )
 
 
-@app.delete("/documents/{filename}")
+@app.delete("/documents/{filename:path}")
 def delete_document(filename: str):
-    """Remove all stored chunks for one ingested document."""
+    """Remove all stored chunks for one ingested document.
+    The :path converter lets URL sources (which contain slashes) match too."""
     try:
         deleted = delete_by_source(filename)
     except Exception:

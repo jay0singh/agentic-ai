@@ -162,7 +162,8 @@ The UI opens automatically at `http://localhost:8501`.
 - Streaming chat — answers render token-by-token as they are generated
 - Conversation memory — follow-up questions are resolved against the session ("does it cost anything?" after a return-policy question just works); Clear Chat starts a fresh session
 - Citation captions under every answer showing which documents (and how many chunks) were used
-- Document upload and ingestion (PDF / DOCX) from the sidebar; re-uploading a file replaces its chunks
+- Document upload and ingestion (PDF / DOCX / TXT / MD) from the sidebar; re-uploading a file replaces its chunks
+- Web page ingestion — paste a URL in the sidebar and its text is fetched, cleaned, and stored
 - Document manager in the sidebar — see every ingested document (chunk count, date) and delete with one click
 - Step badges on every response showing exactly which tools ran (`🔍 vector_search`, `🌐 web_search`, `⚖️ judge`, etc.)
 - Judge reasoning and retrieved sources in expandable panels
@@ -183,7 +184,7 @@ curl http://127.0.0.1:8000/health
 ---
 
 ### `POST /ingest`
-Upload a `.pdf` or `.docx` document to the vector store.
+Upload a `.pdf`, `.docx`, `.txt` or `.md` document to the vector store.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/ingest \
@@ -201,6 +202,17 @@ Response:
 ```
 
 > **Note on the free tier:** Gemini's free tier allows 100 embedding requests per minute. Documents that produce more than ~50 chunks are embedded in batches with an automatic pause between them, so a large ingest can take a couple of minutes — this is expected, not a hang.
+
+---
+
+### `POST /ingest/url`
+Fetch a web page, extract its readable text (scripts, navigation and footers stripped), chunk, embed and store it. The URL is the document's source — re-ingesting it replaces its chunks.
+
+```bash
+curl -X POST http://127.0.0.1:8000/ingest/url \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/article"}'
+```
 
 ---
 

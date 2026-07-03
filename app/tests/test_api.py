@@ -67,8 +67,50 @@ def test_chat_internal_error_is_generic(client, monkeypatch):
 
 
 def test_ingest_rejects_unsupported_file_type(client):
-    r = client.post("/ingest", files={"file": ("notes.txt", b"hello", "text/plain")})
+    r = client.post("/ingest", files={"file": ("data.csv", b"a,b,c", "text/csv")})
     assert r.status_code == 400
+
+
+def test_ingest_accepts_txt(client, monkeypatch):
+    monkeypatch.setattr(api, "load_document", lambda p: "some extracted text")
+    monkeypatch.setattr(api, "setup_table", lambda: None)
+    monkeypatch.setattr(api, "delete_by_source", lambda s: 0)
+    monkeypatch.setattr(api, "embed_and_store", lambda chunks, source: None)
+
+    r = client.post("/ingest", files={"file": ("notes.txt", b"hello world", "text/plain")})
+    assert r.status_code == 200
+    assert r.json()["chunks_stored"] >= 1
+
+
+def test_ingest_url_success(client, monkeypatch):
+    monkeypatch.setattr(api, "load_url", lambda u: ("Page Title", "page text content"))
+    monkeypatch.setattr(api, "setup_table", lambda: None)
+    monkeypatch.setattr(api, "delete_by_source", lambda s: 3)
+    captured = {}
+    monkeypatch.setattr(api, "embed_and_store",
+                        lambda chunks, source: captured.update(source=source))
+
+    r = client.post("/ingest/url", json={"url": "https://example.com/article"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "Page Title"
+    assert body["chunks_replaced"] == 3
+    assert captured["source"] == "https://example.com/article"
+
+
+def test_ingest_url_rejects_bad_scheme(client):
+    r = client.post("/ingest/url", json={"url": "ftp://example.com/file"})
+    assert r.status_code == 400
+
+
+def test_ingest_url_fetch_failure_is_400_without_internals(client, monkeypatch):
+    def boom(url):
+        raise RuntimeError("connection refused to internal-host:5432")
+    monkeypatch.setattr(api, "load_url", boom)
+
+    r = client.post("/ingest/url", json={"url": "https://example.com"})
+    assert r.status_code == 400
+    assert "internal-host" not in r.text
 
 
 def test_list_documents(client, monkeypatch):
@@ -100,6 +142,19 @@ def test_delete_missing_document_is_404(client, monkeypatch):
     monkeypatch.setattr(api, "delete_by_source", lambda source: 0)
     r = client.delete("/documents/nope.docx")
     assert r.status_code == 404
+
+
+def test_delete_url_source_document(client, monkeypatch):
+    captured = {}
+
+    def fake_delete(source):
+        captured["source"] = source
+        return 4
+
+    monkeypatch.setattr(api, "delete_by_source", fake_delete)
+    r = client.delete("/documents/https://example.com/article")
+    assert r.status_code == 200
+    assert captured["source"] == "https://example.com/article"
 
 
 def test_chat_stream_emits_sse_events(client, monkeypatch):
