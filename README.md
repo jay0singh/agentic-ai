@@ -67,7 +67,22 @@ User Query
 
 ---
 
-## Setup
+## Quick Start (one command, everything in Docker)
+
+```bash
+git clone <repo-url>
+cd agentic-ai
+cp .env.example .env     # then paste in your Groq + Gemini keys
+docker compose up -d --build
+```
+
+That starts all three services: PostgreSQL + pgvector, the FastAPI backend (http://localhost:8000), and the Streamlit UI (http://localhost:8501). Stop everything with `docker compose down`.
+
+Prefer running the Python app directly on your machine (e.g. for development with hot reload)? Follow the manual setup below — in that case only the database runs in Docker.
+
+---
+
+## Setup (manual, for development)
 
 ### 1. Clone and create a virtual environment
 
@@ -344,7 +359,8 @@ This produces two outputs:
 agentic-ai/
 ├── .env                        # Environment variables (not committed)
 ├── .env.example                # Template — copy to .env and add your keys
-├── docker-compose.yml          # PostgreSQL + pgvector container
+├── docker-compose.yml          # Full stack: Postgres + API + Streamlit UI
+├── Dockerfile                  # App image shared by the api and ui services
 ├── .github/workflows/ci.yml   # CI: runs the test suite on every push
 ├── documents/                  # Sample documents for ingestion
 │   └── NimbusCart_Policy_Handbook.docx

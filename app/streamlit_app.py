@@ -1,11 +1,12 @@
 import json
+import os
 import uuid
 from urllib.parse import quote
 
 import streamlit as st
 import requests
 
-API_BASE = "http://127.0.0.1:8000"
+API_BASE = os.getenv("API_BASE", "http://127.0.0.1:8000")
 
 STEP_ICONS = {
     "vector_search": "🔍",
