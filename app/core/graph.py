@@ -279,6 +279,10 @@ If "vector_search" or "web_search" is selected, extract:
 - "search_query": A highly specific search query optimised for retrieval.
 
   CRITICAL RULES for search_query:
+  0. NEVER add words to the query that the user did not say — especially brand
+     names (NimbusCart, NimbusDirect, NimbusMarket). If the user asked about
+     "A2A design principles", the search_query is "A2A design principles",
+     NOT "NimbusDirect A2A design principles".
   1. PAST events ("last", "latest", "who won", "which team won"):
      → Include specific year/edition. E.g. "FIFA World Cup 2022 winner Argentina"
   2. FUTURE events ("next", "upcoming", "when is", "schedule", "fixture"):
