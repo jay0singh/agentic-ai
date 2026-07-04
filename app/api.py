@@ -19,6 +19,7 @@ from core.embedder import setup_table, embed_and_store, delete_by_source, list_d
 from core.retriever import retrieve
 from core.generator import run_orchestrator
 from core.graph import stream_orchestrator
+from core import hitl
 
 
 @asynccontextmanager
@@ -207,6 +208,67 @@ def delete_document(filename: str):
         "chunks_deleted": deleted,
         "message": "Document deleted."
     }
+
+
+class HitlResolveRequest(BaseModel):
+    answer: str
+    ingest: bool = True
+
+
+@app.get("/hitl")
+def hitl_queue():
+    """List questions the judge flagged for human review."""
+    try:
+        return {"items": hitl.list_pending()}
+    except Exception:
+        print(f"[HITL] Failed to list queue:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not load the review queue.")
+
+@app.post("/hitl/{item_id}/resolve")
+def hitl_resolve(item_id: int, request: HitlResolveRequest):
+    """Record a human answer for a flagged question. By default the Q&A pair is
+    also embedded into the vector store so future similar questions retrieve it."""
+    answer = request.answer.strip()
+    if not answer:
+        raise HTTPException(status_code=400, detail="Answer cannot be empty.")
+
+    try:
+        question = hitl.resolve(item_id, answer)
+    except Exception:
+        print(f"[HITL] Failed to resolve item {item_id}:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not resolve the item.")
+
+    if question is None:
+        raise HTTPException(status_code=404, detail="No pending review item with that id.")
+
+    ingested = False
+    if request.ingest:
+        try:
+            setup_table()
+            embed_and_store(
+                [f"Question: {question}\nAnswer: {answer}"],
+                source=f"hitl-{item_id}",
+            )
+            ingested = True
+        except Exception:
+            # The resolution is already saved; ingestion is best-effort.
+            print(f"[HITL] Failed to ingest resolved answer {item_id}:\n{traceback.format_exc()}")
+
+    return {"id": item_id, "question": question, "ingested": ingested, "message": "Resolved."}
+
+
+@app.post("/hitl/{item_id}/dismiss")
+def hitl_dismiss(item_id: int):
+    """Dismiss a flagged question without answering it."""
+    try:
+        dismissed = hitl.dismiss(item_id)
+    except Exception:
+        print(f"[HITL] Failed to dismiss item {item_id}:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not dismiss the item.")
+
+    if not dismissed:
+        raise HTTPException(status_code=404, detail="No pending review item with that id.")
+    return {"id": item_id, "message": "Dismissed."}
 
 
 @app.post("/chat", response_model=ChatResponse)

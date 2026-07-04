@@ -739,6 +739,16 @@ def hitl_node(state: AgentState) -> dict:
     print(f"  [HITL] Could not produce a satisfactory answer after {retries} retries.")
     print(f"  [HITL] Unanswered query: \"{query}\"")
     print(f"{'='*60}\n")
+
+    # Persist for human review; a DB failure must not break the chat response.
+    try:
+        from core.hitl import add_to_queue
+        judge_log = state.get("judge_log") or []
+        item_id = add_to_queue(query, state.get("response"), judge_log[-1] if judge_log else None)
+        print(f"  [HITL] Queued for human review (id={item_id}).")
+    except Exception as e:
+        print(f"  [HITL] Failed to persist to review queue: {e}")
+
     return {"steps_taken": steps_taken + ["hitl"]}
 
 

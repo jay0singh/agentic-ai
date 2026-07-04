@@ -157,6 +157,49 @@ def test_delete_url_source_document(client, monkeypatch):
     assert captured["source"] == "https://example.com/article"
 
 
+def test_hitl_list(client, monkeypatch):
+    monkeypatch.setattr(api.hitl, "list_pending", lambda: [
+        {"id": 1, "question": "Unanswerable?", "attempted_answer": "dunno",
+         "judge_reason": "RETRY: not grounded", "created_at": "2026-07-04T10:00:00+00:00"},
+    ])
+    r = client.get("/hitl")
+    assert r.status_code == 200
+    assert r.json()["items"][0]["question"] == "Unanswerable?"
+
+
+def test_hitl_resolve_ingests_answer(client, monkeypatch):
+    monkeypatch.setattr(api.hitl, "resolve", lambda item_id, answer: "What is the Q4 policy?")
+    monkeypatch.setattr(api, "setup_table", lambda: None)
+    captured = {}
+    monkeypatch.setattr(api, "embed_and_store",
+                        lambda chunks, source: captured.update(chunks=chunks, source=source))
+
+    r = client.post("/hitl/5/resolve", json={"answer": "The Q4 policy is X."})
+    assert r.status_code == 200
+    assert r.json()["ingested"] is True
+    assert captured["source"] == "hitl-5"
+    assert "What is the Q4 policy?" in captured["chunks"][0]
+    assert "The Q4 policy is X." in captured["chunks"][0]
+
+
+def test_hitl_resolve_empty_answer_is_400(client):
+    r = client.post("/hitl/5/resolve", json={"answer": "   "})
+    assert r.status_code == 400
+
+
+def test_hitl_resolve_missing_item_is_404(client, monkeypatch):
+    monkeypatch.setattr(api.hitl, "resolve", lambda item_id, answer: None)
+    r = client.post("/hitl/99/resolve", json={"answer": "x"})
+    assert r.status_code == 404
+
+
+def test_hitl_dismiss(client, monkeypatch):
+    monkeypatch.setattr(api.hitl, "dismiss", lambda item_id: True)
+    assert client.post("/hitl/5/dismiss").status_code == 200
+    monkeypatch.setattr(api.hitl, "dismiss", lambda item_id: False)
+    assert client.post("/hitl/99/dismiss").status_code == 404
+
+
 def test_chat_stream_emits_sse_events(client, monkeypatch):
     def fake_stream(question, session_id=None, user_id=None, top_k=3):
         yield {"type": "token", "content": "Hel"}

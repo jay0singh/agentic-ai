@@ -12,6 +12,7 @@ A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluati
 - **Hybrid search** — vector similarity fused with Postgres full-text search via Reciprocal Rank Fusion, so exact-keyword queries ("section 7.4") match reliably
 - **Relevance threshold** — weak vector matches are dropped instead of polluting the prompt (`RETRIEVAL_MAX_DISTANCE`)
 - **LLM-as-judge loop** — a larger model grades each answer and triggers a retry with a rewritten query when it isn't grounded
+- **Human-in-the-loop review queue** — questions the judge gives up on are persisted; a human answers them in the UI and the answer is taught back into the knowledge base
 - **Langfuse tracing** — full traces per request with sessions, judge scores, and token usage (optional, free tier)
 - **Tested + CI** — 67 mocked-LLM tests run on every push via GitHub Actions
 
@@ -42,7 +43,7 @@ User Query
                                            │                  │
                                            ▼                  └──▶ Router
                                       HITL Node
-                                    (logs to terminal)
+                              (persists to review queue)
 ```
 
 **Models (all free tier):**
@@ -168,7 +169,7 @@ The UI opens automatically at `http://localhost:8501`.
 - Document manager in the sidebar — see every ingested document (chunk count, date) and delete with one click
 - Step badges on every response showing exactly which tools ran (`🔍 vector_search`, `🌐 web_search`, `⚖️ judge`, etc.)
 - Judge reasoning and retrieved sources in expandable panels
-- HITL warning shown inline when the judge could not get a satisfactory answer after max retries
+- HITL review queue above the chat — answer flagged questions ("Resolve & teach" adds the answer to the knowledge base) or dismiss them
 - API health indicator in the sidebar
 
 ---
@@ -287,6 +288,18 @@ Each event is a JSON object:
 | `retry` | The judge rejected the draft answer; a new attempt follows (`reason`) |
 | `done` | Final payload — same fields as the `/chat` response |
 | `error` | Something failed; details are in the server log |
+
+---
+
+### HITL review queue
+
+When the judge exhausts its retries, the question is persisted to a `hitl_queue` table instead of being lost:
+
+- `GET /hitl` — list pending flagged questions (with the failed answer and the judge's reasoning)
+- `POST /hitl/{id}/resolve` — body `{"answer": "...", "ingest": true}`; records the human answer and (by default) embeds the Q&A pair into the vector store so future similar questions retrieve it. The taught answer appears in the document manager as `hitl-{id}`.
+- `POST /hitl/{id}/dismiss` — discard a flagged question
+
+The Streamlit UI surfaces pending items in a "Review queue" panel above the chat.
 
 ---
 

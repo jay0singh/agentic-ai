@@ -184,6 +184,47 @@ with st.sidebar:
         st.session_state.session_id = str(uuid.uuid4())
         st.rerun()
 
+# ── HITL review queue ──────────────────────────────────────────────────────────
+try:
+    hitl_items = requests.get(f"{API_BASE}/hitl", timeout=5).json().get("items", [])
+except Exception:
+    hitl_items = []
+
+if hitl_items:
+    n = len(hitl_items)
+    with st.expander(f"🚨 Review queue — {n} unanswered question{'s' if n > 1 else ''}"):
+        for item in hitl_items:
+            st.markdown(f"**Q: {item['question']}**")
+            if item.get("judge_reason"):
+                st.caption(f"⚖️ {item['judge_reason']}")
+            if item.get("attempted_answer"):
+                st.caption(f"Last attempt: {item['attempted_answer'][:200]}")
+            answer = st.text_area(
+                "Answer", key=f"hitl-answer-{item['id']}",
+                label_visibility="collapsed", placeholder="Write the correct answer…"
+            )
+            resolve_col, dismiss_col = st.columns(2)
+            if resolve_col.button("✅ Resolve & teach", key=f"hitl-resolve-{item['id']}",
+                                  help="Saves the answer and adds it to the knowledge base"):
+                if not answer.strip():
+                    st.warning("Write an answer first.")
+                else:
+                    try:
+                        r = requests.post(f"{API_BASE}/hitl/{item['id']}/resolve",
+                                          json={"answer": answer}, timeout=120)
+                        if r.status_code == 200:
+                            st.rerun()
+                        st.error(r.json().get("detail", r.text))
+                    except Exception as e:
+                        st.error(f"Connection error: {e}")
+            if dismiss_col.button("🗑️ Dismiss", key=f"hitl-dismiss-{item['id']}"):
+                try:
+                    requests.post(f"{API_BASE}/hitl/{item['id']}/dismiss", timeout=30)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Connection error: {e}")
+            st.divider()
+
 # ── Chat history ───────────────────────────────────────────────────────────────
 st.header("Chat")
 

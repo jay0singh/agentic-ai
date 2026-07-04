@@ -90,6 +90,32 @@ class TestRewriteNode:
         assert result["next_node"] == "end"
 
 
+class TestHitlNode:
+    def test_persists_question_to_queue(self, monkeypatch):
+        captured = {}
+
+        def fake_add(question, attempted_answer, judge_reason):
+            captured.update(question=question, answer=attempted_answer, reason=judge_reason)
+            return 42
+
+        monkeypatch.setattr("core.hitl.add_to_queue", fake_add)
+        state = make_state("hard question", response="weak answer",
+                           judge_log=["RETRY: not grounded"], retry_count=3)
+        result = graph.hitl_node(state)
+
+        assert result["steps_taken"][-1] == "hitl"
+        assert captured == {"question": "hard question", "answer": "weak answer",
+                            "reason": "RETRY: not grounded"}
+
+    def test_db_failure_does_not_break_response(self, monkeypatch):
+        def boom(*args):
+            raise RuntimeError("db down")
+
+        monkeypatch.setattr("core.hitl.add_to_queue", boom)
+        result = graph.hitl_node(make_state("q", response="a", retry_count=3))
+        assert result["steps_taken"][-1] == "hitl"
+
+
 class TestRouteAfterRewrite:
     def test_accept_and_stop_ends_graph(self):
         assert graph.route_after_rewrite({"next_node": "end"}) == "end"
