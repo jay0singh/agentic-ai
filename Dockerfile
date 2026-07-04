@@ -1,5 +1,8 @@
 FROM python:3.13-slim
 
+# Flush print/log output immediately so `docker compose logs` shows it live.
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 COPY app/requirements.txt .
