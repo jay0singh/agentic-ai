@@ -14,7 +14,7 @@ A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluati
 - **LLM-as-judge loop** — a larger model grades each answer and triggers a retry with a rewritten query when it isn't grounded
 - **Human-in-the-loop review queue** — questions the judge gives up on are persisted; a human answers them in the UI and the answer is taught back into the knowledge base
 - **Langfuse tracing** — full traces per request with sessions, judge scores, and token usage (optional, free tier)
-- **Tested + CI** — 67 mocked-LLM tests run on every push via GitHub Actions
+- **Tested + CI** — 90+ mocked-LLM tests run on every push via GitHub Actions
 
 ---
 
@@ -305,7 +305,7 @@ The Streamlit UI surfaces pending items in a "Review queue" panel above the chat
 
 ## Running the Tests
 
-67 unit and API tests run with all LLM calls mocked — no API keys, database, or network needed:
+The test suite (90+ unit and API tests) runs with all LLM calls mocked — no API keys, database, or network needed:
 
 ```bash
 pip install -r app/requirements-dev.txt
@@ -397,9 +397,10 @@ agentic-ai/
     ├── generate_graph.py       # Graph visualisation script
     ├── requirements.txt        # Python dependencies
     ├── requirements-dev.txt    # Test dependencies (pytest)
-    ├── tests/                  # 67 unit + API tests, all LLM calls mocked
+    ├── tests/                  # Unit + API tests, all LLM calls mocked
     └── core/
         ├── graph.py            # LangGraph nodes and workflow (main logic)
+        ├── hitl.py             # Human-in-the-loop review queue storage
         ├── memory.py           # Per-session conversation memory
         ├── embeddings.py       # Gemini embeddings (swap provider here)
         ├── generator.py        # Legacy generator (used by api.py)
