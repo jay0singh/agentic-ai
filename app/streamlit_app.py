@@ -116,6 +116,12 @@ with st.sidebar:
     else:
         st.error("API offline — start the FastAPI server", icon="🔴")
 
+    top_k = st.slider(
+        "Chunks to retrieve (top_k)", min_value=1, max_value=10, value=3,
+        help="Raise this for list-style questions (\"list all the fees...\") "
+             "so the answer isn't missing items that live in later chunks."
+    )
+
     st.divider()
 
     st.subheader("📄 Ingest Document")
@@ -253,7 +259,7 @@ if prompt := st.chat_input("Ask me anything…"):
 
         try:
             for event in stream_chat_events(
-                {"question": prompt, "session_id": st.session_state.session_id}
+                {"question": prompt, "session_id": st.session_state.session_id, "top_k": top_k}
             ):
                 if event["type"] == "token":
                     streamed_text += event["content"]
