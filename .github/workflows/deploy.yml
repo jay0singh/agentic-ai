@@ -1,0 +1,32 @@
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Dormant until the HF_SPACE repo variable (e.g. "username/agentic-ai")
+    # and the HF_TOKEN secret are configured in the GitHub repo settings.
+    if: vars.HF_SPACE != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Space content
+        run: |
+          cp deploy/Dockerfile.hf Dockerfile
+          cp deploy/README_hf.md README.md
+
+      - name: Push to Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Deploy ${GITHUB_SHA::7} to Space"
+          HF_USER="${HF_SPACE%%/*}"
+          git push --force "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main

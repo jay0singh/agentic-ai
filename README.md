@@ -317,6 +317,20 @@ The Streamlit UI surfaces pending items in a "Review queue" panel above the chat
 
 ---
 
+## Hosting (Hugging Face Spaces, free)
+
+The repo auto-deploys to a Hugging Face Space on every push to `dev` ([deploy workflow](.github/workflows/deploy.yml)). The Space runs a single container: the API stays private on localhost and only the Streamlit UI is exposed. The database is a free managed Postgres with pgvector (e.g. [Neon](https://neon.tech)) — set `DB_SSLMODE=require` for it.
+
+One-time setup:
+
+1. Create a free **Docker Space** at [huggingface.co/new-space](https://huggingface.co/new-space)
+2. Create a free [Neon](https://neon.tech) Postgres project and copy its connection details
+3. In the Space **Settings → Variables and secrets**, add the keys listed in [deploy/README_hf.md](deploy/README_hf.md)
+4. In this GitHub repo: **Settings → Secrets and variables → Actions** — add secret `HF_TOKEN` (a Hugging Face *write* token) and variable `HF_SPACE` (e.g. `username/agentic-ai`)
+5. Push to `dev` (or run the Deploy workflow manually) — the Space builds and goes live
+
+---
+
 ## Running the Tests
 
 The test suite (90+ unit and API tests) runs with all LLM calls mocked — no API keys, database, or network needed:

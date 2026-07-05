@@ -19,6 +19,11 @@ DB_CONFIG = {
     "host":     os.getenv("DB_HOST"),
     "port":     os.getenv("DB_PORT"),
 }
+# Managed Postgres providers (e.g. Neon) require SSL; local Docker does not.
+_SSLMODE = os.getenv("DB_SSLMODE")
+if _SSLMODE:
+    DB_CONFIG["sslmode"] = _SSLMODE
+
 TABLE       = os.getenv("DB_TABLE")
 
 # Construct database connection URL (uses psycopg3 driver via 'psycopg')
@@ -28,6 +33,8 @@ db_host = DB_CONFIG["host"]
 db_port = DB_CONFIG["port"]
 db_name = DB_CONFIG["dbname"]
 CONNECTION_URL = f"postgresql+psycopg://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+if _SSLMODE:
+    CONNECTION_URL += f"?sslmode={_SSLMODE}"
 
 _engine = None
 
