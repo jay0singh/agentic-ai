@@ -6,9 +6,11 @@ import sys
 # test runs from the developer's real .env where it matters.
 os.environ.setdefault("GROQ_API_KEY", "gsk-test-dummy")
 os.environ.setdefault("GOOGLE_API_KEY", "test-dummy")
-os.environ.setdefault("DB_NAME", "testdb")
-os.environ.setdefault("DB_USER", "test")
-os.environ.setdefault("DB_PASSWORD", "test")
+# Matches both the local pgvector-db container and the CI postgres service, so
+# the storage tests (memory) can run against a real database in both places.
+os.environ.setdefault("DB_NAME", "vectordb")
+os.environ.setdefault("DB_USER", "postgres")
+os.environ.setdefault("DB_PASSWORD", "postgres")
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5433")
 os.environ.setdefault("DB_TABLE", "documents")
