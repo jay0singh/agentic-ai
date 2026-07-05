@@ -128,12 +128,46 @@ def render_extras(sources: list, judge_log: list):
                     st.divider()
 
 
+def load_transcript_messages(session_id: str) -> list:
+    """Rebuild the message list from the server-side transcript."""
+    try:
+        r = requests.get(f"{API_BASE}/conversations/{session_id}", timeout=5)
+        turns = r.json().get("turns", []) if r.status_code == 200 else []
+    except Exception:
+        return []
+    messages = []
+    for turn in turns:
+        details = turn.get("details") or {}
+        messages.append({"role": "user", "content": turn["question"]})
+        messages.append({
+            "role": "assistant",
+            "content": turn["answer"],
+            "steps_taken": details.get("steps_taken", []),
+            "citations": details.get("citations", []),
+            "judge_log": details.get("judge_log", []),
+            "trace_id": details.get("trace_id"),
+            "context_sources": [],
+        })
+    return messages
+
+
+def switch_conversation(session_id: str, messages: list | None = None):
+    st.session_state.session_id = session_id
+    st.session_state.messages = messages if messages is not None else load_transcript_messages(session_id)
+    st.query_params["sid"] = session_id
+    st.rerun()
+
+
 # ── Session state ──────────────────────────────────────────────────────────────
+# The session id lives in the URL (?sid=...), so refreshing the page restores
+# the same conversation from the server-side transcript.
+if "session_id" not in st.session_state:
+    sid = st.query_params.get("sid") or str(uuid.uuid4())
+    st.session_state.session_id = sid
+    st.query_params["sid"] = sid
+    st.session_state.messages = load_transcript_messages(sid)
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "session_id" not in st.session_state:
-    # Groups this conversation's traces in Langfuse's Sessions view
-    st.session_state.session_id = str(uuid.uuid4())
 
 # ── Sidebar ────────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -213,10 +247,29 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("🗑️ Clear Chat", use_container_width=True):
-        st.session_state.messages = []
-        st.session_state.session_id = str(uuid.uuid4())
-        st.rerun()
+    st.subheader("💬 Conversations")
+    if st.button("➕ New chat", use_container_width=True):
+        switch_conversation(str(uuid.uuid4()), messages=[])
+
+    try:
+        conv_list = requests.get(f"{API_BASE}/conversations", timeout=5).json().get("conversations", [])
+    except Exception:
+        conv_list = []
+
+    for conv in conv_list:
+        is_current = conv["session_id"] == st.session_state.session_id
+        label = ("▶ " if is_current else "") + (conv["title"][:38] or "(untitled)")
+        title_col, del_col = st.columns([5, 1])
+        if title_col.button(label, key=f"conv-{conv['session_id']}", use_container_width=True):
+            switch_conversation(conv["session_id"])
+        if del_col.button("🗑️", key=f"conv-del-{conv['session_id']}", help="Delete conversation"):
+            try:
+                requests.delete(f"{API_BASE}/conversations/{conv['session_id']}", timeout=15)
+            except Exception:
+                pass
+            if is_current:
+                switch_conversation(str(uuid.uuid4()), messages=[])
+            st.rerun()
 
 # ── HITL review queue ──────────────────────────────────────────────────────────
 try:

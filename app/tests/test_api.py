@@ -161,6 +161,41 @@ def test_delete_url_source_document(client, monkeypatch):
     assert captured["source"] == "https://example.com/article"
 
 
+def test_list_conversations(client, monkeypatch):
+    monkeypatch.setattr(api.conversations, "list_conversations", lambda: [
+        {"session_id": "s1", "title": "What is X?", "turns": 2, "last_at": "2026-07-05T10:00:00+00:00"},
+    ])
+    r = client.get("/conversations")
+    assert r.status_code == 200
+    assert r.json()["conversations"][0]["title"] == "What is X?"
+
+
+def test_get_conversation_transcript(client, monkeypatch):
+    monkeypatch.setattr(api.conversations, "get_transcript", lambda sid: [
+        {"question": "q", "answer": "a", "details": {"trace_id": "t1"}},
+    ])
+    r = client.get("/conversations/s1")
+    assert r.status_code == 200
+    assert r.json()["turns"][0]["details"]["trace_id"] == "t1"
+
+
+def test_delete_conversation_clears_memory_too(client, monkeypatch):
+    cleared = {}
+    monkeypatch.setattr(api.conversations, "delete_conversation", lambda sid: 3)
+    monkeypatch.setattr(api, "clear_session", lambda sid: cleared.update(sid=sid))
+
+    r = client.delete("/conversations/s1")
+    assert r.status_code == 200
+    assert r.json()["turns_deleted"] == 3
+    assert cleared["sid"] == "s1"
+
+
+def test_delete_missing_conversation_is_404(client, monkeypatch):
+    monkeypatch.setattr(api.conversations, "delete_conversation", lambda sid: 0)
+    monkeypatch.setattr(api, "clear_session", lambda sid: None)
+    assert client.delete("/conversations/nope").status_code == 404
+
+
 def test_feedback_records_score(client, monkeypatch):
     captured = {}
 

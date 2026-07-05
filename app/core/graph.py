@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage
 
 from core.retriever import retrieve
 from core.memory import add_turn, get_history, format_history
+from core.conversations import record_turn as record_transcript
 
 load_dotenv()
 
@@ -903,6 +904,12 @@ def run_orchestrator(
     add_turn(session_id, query, state.get("response"))
     state = dict(state)
     state["trace_id"] = trace_id
+    record_transcript(session_id, query, state.get("response") or "", {
+        "steps_taken": state.get("steps_taken", []),
+        "citations": state.get("citations", []),
+        "judge_log": state.get("judge_log", []),
+        "trace_id": trace_id,
+    })
     return state
 
 
@@ -971,6 +978,12 @@ def stream_orchestrator(
                         span.set_trace_io(output={"answer": final_state.get("response")})
 
             add_turn(session_id, query, final_state.get("response"))
+            record_transcript(session_id, query, final_state.get("response") or "", {
+                "steps_taken": final_state.get("steps_taken", []),
+                "citations": final_state.get("citations", []),
+                "judge_log": final_state.get("judge_log", []),
+                "trace_id": trace_id,
+            })
             events.put({
                 "type": "done",
                 "question": query,

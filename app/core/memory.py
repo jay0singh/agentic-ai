@@ -75,6 +75,17 @@ def get_history(session_id: str | None) -> list[tuple[str, str]]:
         return []
 
 
+def clear_session(session_id: str | None) -> None:
+    """Forget a session's working memory (used when its conversation is deleted)."""
+    if not session_id:
+        return
+    try:
+        with _connect() as conn:
+            conn.execute("DELETE FROM chat_memory WHERE session_id = %s", (session_id,))
+    except Exception as e:
+        print(f"  [Memory] Failed to clear session ({e}).")
+
+
 def format_history(history: list[tuple[str, str]]) -> str:
     """Render turns as a compact transcript for use inside prompts."""
     lines = []

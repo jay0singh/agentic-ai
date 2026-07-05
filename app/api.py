@@ -19,6 +19,8 @@ from core.embedder import setup_table, embed_and_store, delete_by_source, list_d
 from core.retriever import retrieve
 from core.generator import run_orchestrator
 from core.graph import stream_orchestrator
+from core.memory import clear_session
+from core import conversations
 from core import hitl
 
 
@@ -203,6 +205,41 @@ def delete_document(filename: str):
         "chunks_deleted": deleted,
         "message": "Document deleted."
     }
+
+
+@app.get("/conversations")
+def list_conversations():
+    """Recent conversations (id, title, turn count, last activity)."""
+    try:
+        return {"conversations": conversations.list_conversations()}
+    except Exception:
+        print(f"[Conversations] Failed to list:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not list conversations.")
+
+
+@app.get("/conversations/{session_id}")
+def get_conversation(session_id: str):
+    """Full transcript of one conversation, oldest turn first."""
+    try:
+        return {"session_id": session_id, "turns": conversations.get_transcript(session_id)}
+    except Exception:
+        print(f"[Conversations] Failed to load '{session_id}':\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not load the conversation.")
+
+
+@app.delete("/conversations/{session_id}")
+def delete_conversation(session_id: str):
+    """Delete a conversation's transcript and its working memory."""
+    try:
+        deleted = conversations.delete_conversation(session_id)
+        clear_session(session_id)
+    except Exception:
+        print(f"[Conversations] Failed to delete '{session_id}':\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not delete the conversation.")
+
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="No conversation with that id.")
+    return {"session_id": session_id, "turns_deleted": deleted, "message": "Conversation deleted."}
 
 
 class FeedbackRequest(BaseModel):

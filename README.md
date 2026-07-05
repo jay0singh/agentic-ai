@@ -7,7 +7,8 @@ A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluati
 **Highlights**
 
 - **Streaming answers** — tokens render live in the UI via an SSE endpoint (`/chat/stream`)
-- **Conversation memory** — follow-up questions ("does it cost anything?") are resolved against the session history before routing
+- **Persistent conversations** — full transcripts live in Postgres: refresh the page and your chat is still there, switch between past conversations in the sidebar
+- **Conversation memory** — follow-up questions ("does it cost anything?") are resolved against the session history before routing, surviving server restarts
 - **Source citations** — every retrieved chunk carries its source filename and similarity score; answers show what they cited
 - **Hybrid search** — vector similarity fused with Postgres full-text search via Reciprocal Rank Fusion, so exact-keyword queries ("section 7.4") match reliably
 - **Relevance threshold** — weak vector matches are dropped instead of polluting the prompt (`RETRIEVAL_MAX_DISTANCE`)
@@ -163,6 +164,7 @@ The UI opens automatically at `http://localhost:8501`.
 
 **Features:**
 - Streaming chat — answers render token-by-token as they are generated
+- Conversation sidebar — past conversations persist in Postgres; the session id lives in the URL, so a page refresh restores your chat, and you can switch, start new, or delete conversations
 - Conversation memory — follow-up questions are resolved against the session ("does it cost anything?" after a return-policy question just works); Clear Chat starts a fresh session
 - Citation captions under every answer showing which documents (and how many chunks) were used
 - 👍/👎 feedback buttons under every answer (recorded as scores on the answer's Langfuse trace)
@@ -290,6 +292,16 @@ Each event is a JSON object:
 | `retry` | The judge rejected the draft answer; a new attempt follows (`reason`) |
 | `done` | Final payload — same fields as the `/chat` response |
 | `error` | Something failed; details are in the server log |
+
+---
+
+### Conversations
+
+Full chat transcripts are persisted server-side (30-day retention):
+
+- `GET /conversations` — recent conversations (title = first question, turn count, last activity)
+- `GET /conversations/{session_id}` — full transcript with per-turn steps, citations and trace ids
+- `DELETE /conversations/{session_id}` — remove a conversation's transcript and working memory
 
 ---
 
