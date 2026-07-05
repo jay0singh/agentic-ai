@@ -43,6 +43,14 @@ def load_url(url: str) -> tuple[str, str]:
         tag.decompose()
 
     title = (soup.title.string or "").strip() if soup.title and soup.title.string else ""
+
+    # Rewrite <h1>-<h6> as Markdown headings so the heading-aware chunker can
+    # prefix each chunk with its section, same as for uploaded documents.
+    for level in range(1, 7):
+        for heading in soup.find_all(f"h{level}"):
+            heading_text = heading.get_text(strip=True)
+            if heading_text:
+                heading.string = f"\n{'#' * level} {heading_text}\n"
     lines = (line.strip() for line in soup.get_text("\n").splitlines())
     text = "\n".join(line for line in lines if line)
     return title, text
