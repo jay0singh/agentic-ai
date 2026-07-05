@@ -83,7 +83,8 @@ def web_search(query: str) -> str:
         data = response.json()
         results = []
         for r in data.get("results", []):
-            results.append(f"Title: {r.get('title')}\nURL: {r.get('url')}\nSnippet: {r.get('content')}")
+            snippet = (r.get("content") or "")[:1000]  # keep prompts within token limits
+            results.append(f"Title: {r.get('title')}\nURL: {r.get('url')}\nSnippet: {snippet}")
         return "\n\n---\n\n".join(results) if results else "No search results found."
     except Exception as e:
         return f"Error executing web search: {e}"
@@ -490,6 +491,9 @@ def github_read_node(state: AgentState) -> dict:
     }
 
 
+MAX_GENERATOR_CONTEXT_CHARS = int(os.getenv("MAX_GENERATOR_CONTEXT_CHARS", "10000"))
+
+
 def generator_node(state: AgentState) -> dict:
     print("  [Node] Synthesizing final answer...")
 
@@ -501,6 +505,13 @@ CONVERSATION SO FAR (for context — the question may refer back to it):
 {state["history"]}
 """
 
+    # Cap the accumulated context so the prompt stays within the free tier's
+    # tokens-per-minute limit (large top_k + full web results can exceed it).
+    context_str = "\n\n========================================\n\n".join(state.get("context") or [])
+    if len(context_str) > MAX_GENERATOR_CONTEXT_CHARS:
+        print(f"  [Node] Truncating context from {len(context_str)} to {MAX_GENERATOR_CONTEXT_CHARS} chars.")
+        context_str = context_str[:MAX_GENERATOR_CONTEXT_CHARS] + "\n...[context truncated]..."
+
     if not state.get("context"):
         # Respond directly if no context was retrieved (e.g. greetings, casual chat)
         prompt = f"""You are a helpful assistant. Respond to the user's input directly.
@@ -511,7 +522,6 @@ USER INPUT:
 RESPONSE:"""
     elif "github_read" in state.get("steps_taken", []):
         # GitHub read: summarise the fetched content in response to the user's request
-        context_str = "\n\n========================================\n\n".join(state["context"])
         prompt = f"""You are a helpful assistant. The user requested information from a GitHub repository.
 Below is the content fetched from GitHub. Summarise it clearly and concisely in response to the user's request.
 If the context contains a file or README, describe what the repository is, its purpose, and its key features.
@@ -526,7 +536,6 @@ USER REQUEST:
 RESPONSE:"""
     else:
         # Context-based RAG prompt
-        context_str = "\n\n========================================\n\n".join(state["context"])
         prompt = f"""You are a helpful assistant. Answer the user's question as accurately and helpfully as possible.
 
 Context retrieved from search tools is provided below. Use it as follows:

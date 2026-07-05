@@ -88,6 +88,26 @@ class TestVectorSearchNode:
         assert result["citations"] == []
 
 
+class TestGeneratorNode:
+    def test_oversized_context_is_capped(self, monkeypatch):
+        captured = {}
+
+        class CapturingModel:
+            def invoke(self, messages):
+                captured["prompt"] = messages[0].content
+                return type("Msg", (), {"content": "ok"})()
+
+        monkeypatch.setattr(graph, "chat_model", CapturingModel())
+        # Simulate top_k=10 + long web results: way beyond any token budget
+        state = make_state("q", context=["x" * 50_000], steps_taken=["vector_search"])
+        result = graph.generator_node(state)
+
+        assert result["next_node"] == "judge"
+        assert "[context truncated]" in captured["prompt"]
+        # Prompt = capped context + instructions; must stay near the cap
+        assert len(captured["prompt"]) < graph.MAX_GENERATOR_CONTEXT_CHARS + 3_000
+
+
 class TestResolveFollowup:
     def test_rewrites_followup(self, monkeypatch):
         monkeypatch.setattr(
