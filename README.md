@@ -14,6 +14,7 @@ A LangGraph-powered RAG system with multi-tool routing, an LLM-as-judge evaluati
 - **LLM-as-judge loop** — a larger model grades each answer and triggers a retry with a rewritten query when it isn't grounded
 - **Human-in-the-loop review queue** — questions the judge gives up on are persisted; a human answers them in the UI and the answer is taught back into the knowledge base
 - **Langfuse tracing** — full traces per request with sessions, judge scores, and token usage (optional, free tier)
+- **User feedback** — 👍/👎 under every answer, stored as a `user-thumbs` score on that answer's trace for quality analysis
 - **Tested + CI** — 90+ mocked-LLM tests run on every push via GitHub Actions
 
 ---
@@ -164,6 +165,7 @@ The UI opens automatically at `http://localhost:8501`.
 - Streaming chat — answers render token-by-token as they are generated
 - Conversation memory — follow-up questions are resolved against the session ("does it cost anything?" after a return-policy question just works); Clear Chat starts a fresh session
 - Citation captions under every answer showing which documents (and how many chunks) were used
+- 👍/👎 feedback buttons under every answer (recorded as scores on the answer's Langfuse trace)
 - Document upload and ingestion (PDF / DOCX / TXT / MD) from the sidebar; re-uploading a file replaces its chunks
 - Web page ingestion — paste a URL in the sidebar and its text is fetched, cleaned, and stored
 - Document manager in the sidebar — see every ingested document (chunk count, date) and delete with one click

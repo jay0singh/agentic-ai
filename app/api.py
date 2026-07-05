@@ -58,6 +58,7 @@ class ChatResponse(BaseModel):
     context_sources: list[str]
     citations: list[dict]
     judge_log: list[str]
+    trace_id: str | None = None
 
 class HealthResponse(BaseModel):
     status: str
@@ -204,6 +205,41 @@ def delete_document(filename: str):
     }
 
 
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    helpful: bool
+    comment: str | None = None
+
+
+def record_feedback(trace_id: str, helpful: bool, comment: str | None) -> None:
+    """Store user feedback as a boolean score on the answer's Langfuse trace."""
+    from langfuse import get_client
+    client = get_client()
+    client.create_score(
+        name="user-thumbs",
+        value=1 if helpful else 0,
+        trace_id=trace_id,
+        data_type="BOOLEAN",
+        comment=comment or None,
+    )
+    client.flush()
+
+
+@app.post("/feedback")
+def feedback(request: FeedbackRequest):
+    """Record 👍/👎 feedback for an answer, attached to its Langfuse trace."""
+    if not (os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")):
+        raise HTTPException(status_code=503, detail="Feedback requires Langfuse tracing to be configured.")
+
+    try:
+        record_feedback(request.trace_id, request.helpful, request.comment)
+    except Exception:
+        print(f"[Feedback] Failed to record:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Could not record feedback.")
+
+    return {"message": "Feedback recorded."}
+
+
 class HitlResolveRequest(BaseModel):
     answer: str
     ingest: bool = True
@@ -293,7 +329,8 @@ def chat(request: ChatRequest):
         "steps_taken": state.get("steps_taken", []),
         "context_sources": state.get("context", []),
         "citations": state.get("citations", []),
-        "judge_log": state.get("judge_log", [])
+        "judge_log": state.get("judge_log", []),
+        "trace_id": state.get("trace_id")
     }
 
 

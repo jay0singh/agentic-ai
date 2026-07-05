@@ -12,6 +12,9 @@ os.environ.setdefault("DB_PASSWORD", "test")
 os.environ.setdefault("DB_HOST", "localhost")
 os.environ.setdefault("DB_PORT", "5433")
 os.environ.setdefault("DB_TABLE", "documents")
+os.environ.setdefault("LANGFUSE_PUBLIC_KEY", "pk-lf-test-dummy")
+os.environ.setdefault("LANGFUSE_SECRET_KEY", "sk-lf-test-dummy")
+os.environ.setdefault("LANGFUSE_BASE_URL", "http://localhost:9999")
 
 # Make the app package root (app/) importable regardless of pytest's cwd.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

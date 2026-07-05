@@ -75,6 +75,34 @@ def stream_chat_events(payload: dict):
                 yield json.loads(line[len("data: "):])
 
 
+def send_feedback(trace_id: str, helpful: bool) -> bool:
+    try:
+        r = requests.post(f"{API_BASE}/feedback",
+                          json={"trace_id": trace_id, "helpful": helpful}, timeout=10)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
+def render_feedback(msg: dict, key: str):
+    """👍/👎 buttons under an answer; records a score on its Langfuse trace."""
+    trace_id = msg.get("trace_id")
+    if not trace_id:
+        return
+    if msg.get("feedback"):
+        st.caption(f"Feedback recorded: {msg['feedback']}")
+        return
+    up_col, down_col, _ = st.columns([1, 1, 10])
+    if up_col.button("👍", key=f"fb-up-{key}", help="Good answer"):
+        if send_feedback(trace_id, True):
+            msg["feedback"] = "👍"
+        st.rerun()
+    if down_col.button("👎", key=f"fb-down-{key}", help="Bad answer"):
+        if send_feedback(trace_id, False):
+            msg["feedback"] = "👎"
+        st.rerun()
+
+
 def api_online() -> bool:
     try:
         return requests.get(f"{API_BASE}/health", timeout=2).status_code == 200
@@ -234,7 +262,7 @@ if hitl_items:
 # ── Chat history ───────────────────────────────────────────────────────────────
 st.header("Chat")
 
-for msg in st.session_state.messages:
+for i, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("steps_taken"):
@@ -242,6 +270,7 @@ for msg in st.session_state.messages:
             if "hitl" in msg["steps_taken"]:
                 st.warning("Could not produce a satisfactory answer after multiple retries.")
         render_citations(msg.get("citations", []))
+        render_feedback(msg, str(i))
         render_extras(msg.get("context_sources", []), msg.get("judge_log", []))
 
 # ── Input ──────────────────────────────────────────────────────────────────────
@@ -283,26 +312,14 @@ if prompt := st.chat_input("Ask me anything…"):
                 {"role": "assistant", "content": message, "steps_taken": []}
             )
         else:
-            answer = final.get("answer") or streamed_text
-            steps = final.get("steps_taken", [])
-            sources = final.get("context_sources", [])
-            citations = final.get("citations", [])
-            judge_log = final.get("judge_log", [])
-
-            placeholder.markdown(answer)
-            render_steps(steps)
-
-            if "hitl" in steps:
-                st.warning("Could not produce a satisfactory answer after multiple retries.")
-
-            render_citations(citations)
-            render_extras(sources, judge_log)
-
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": answer,
-                "steps_taken": steps,
-                "context_sources": sources,
-                "citations": citations,
-                "judge_log": judge_log
+                "content": final.get("answer") or streamed_text,
+                "steps_taken": final.get("steps_taken", []),
+                "context_sources": final.get("context_sources", []),
+                "citations": final.get("citations", []),
+                "judge_log": final.get("judge_log", []),
+                "trace_id": final.get("trace_id")
             })
+            # Re-render via history so the new message gets its feedback buttons
+            st.rerun()

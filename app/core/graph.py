@@ -1,6 +1,9 @@
 import os
 import json
 import base64
+import queue
+import threading
+import traceback
 import requests
 import urllib.parse
 from typing import TypedDict, List, Dict, Any, Optional
@@ -892,11 +895,14 @@ def run_orchestrator(
 
     with propagate_attributes(**attrs):
         with get_client().start_as_current_observation(as_type="span", name="rag-chat") as span:
+            trace_id = get_client().get_current_trace_id()
             span.set_trace_io(input=trace_input)
             state = app.invoke(initial_state, config=config)
             span.set_trace_io(output={"answer": state.get("response")})
 
     add_turn(session_id, query, state.get("response"))
+    state = dict(state)
+    state["trace_id"] = trace_id
     return state
 
 
@@ -910,42 +916,80 @@ def stream_orchestrator(
 
     - {"type": "token", "content": ...}   generator tokens as they are produced
     - {"type": "retry", "reason": ...}    judge rejected the answer; a new attempt follows
-    - {"type": "done", ...}               final answer with steps/citations/judge log
+    - {"type": "done", ...}               final answer with steps/citations/judge log/trace_id
+    - {"type": "error", "message": ...}   the pipeline failed
+
+    The graph runs in a worker thread that owns the Langfuse span context
+    (OTel context does not survive a generator being resumed across threads),
+    pushing events through a queue that this generator drains.
     """
     resolved_query, history_str = _resolve_query(query, session_id)
     initial_state = _initial_state(resolved_query, history_str, top_k)
 
-    config = {"recursion_limit": RECURSION_LIMIT}
-    if _langfuse_handler:
-        metadata = {"langfuse_tags": ["rag-demo"]}
-        if session_id:
-            metadata["langfuse_session_id"] = session_id
-        if user_id:
-            metadata["langfuse_user_id"] = user_id
-        config.update({"callbacks": [_langfuse_handler], "run_name": "rag-chat", "metadata": metadata})
+    events: queue.Queue = queue.Queue()
 
-    final_state = initial_state
-    for mode, payload in app.stream(initial_state, config=config, stream_mode=["messages", "values"]):
-        if mode == "messages":
-            chunk, chunk_meta = payload
-            # Only forward tokens from the answer generator — router/classifier/
-            # judge LLM output is internal and must not reach the user.
-            if chunk_meta.get("langgraph_node") == "generator" and getattr(chunk, "content", ""):
-                yield {"type": "token", "content": chunk.content}
-        else:  # "values": a full state snapshot after each node
-            final_state = payload
-            steps = payload.get("steps_taken") or []
-            if payload.get("judge_decision") == "retry" and steps[-1:] == ["judge"]:
-                reason = (payload.get("judge_log") or [""])[-1]
-                yield {"type": "retry", "reason": reason}
+    def emit_graph_events(config) -> dict:
+        final_state = initial_state
+        for mode, payload in app.stream(initial_state, config=config, stream_mode=["messages", "values"]):
+            if mode == "messages":
+                chunk, chunk_meta = payload
+                # Only forward tokens from the answer generator — router/classifier/
+                # judge LLM output is internal and must not reach the user.
+                if chunk_meta.get("langgraph_node") == "generator" and getattr(chunk, "content", ""):
+                    events.put({"type": "token", "content": chunk.content})
+            else:  # "values": a full state snapshot after each node
+                final_state = payload
+                steps = payload.get("steps_taken") or []
+                if payload.get("judge_decision") == "retry" and steps[-1:] == ["judge"]:
+                    reason = (payload.get("judge_log") or [""])[-1]
+                    events.put({"type": "retry", "reason": reason})
+        return final_state
 
-    add_turn(session_id, query, final_state.get("response"))
-    yield {
-        "type": "done",
-        "question": query,
-        "answer": final_state.get("response", "No response generated."),
-        "steps_taken": final_state.get("steps_taken", []),
-        "context_sources": final_state.get("context", []),
-        "citations": final_state.get("citations", []),
-        "judge_log": final_state.get("judge_log", []),
-    }
+    def worker():
+        trace_id = None
+        try:
+            if not _langfuse_handler:
+                final_state = emit_graph_events({"recursion_limit": RECURSION_LIMIT})
+            else:
+                from langfuse import get_client, propagate_attributes
+
+                config = {"recursion_limit": RECURSION_LIMIT, "callbacks": [_langfuse_handler]}
+                attrs = {"trace_name": "rag-chat", "tags": ["rag-demo"]}
+                if session_id:
+                    attrs["session_id"] = session_id
+                if user_id:
+                    attrs["user_id"] = user_id
+                trace_input = {"question": query}
+                if resolved_query != query:
+                    trace_input["resolved_question"] = resolved_query
+
+                with propagate_attributes(**attrs):
+                    with get_client().start_as_current_observation(as_type="span", name="rag-chat") as span:
+                        trace_id = get_client().get_current_trace_id()
+                        span.set_trace_io(input=trace_input)
+                        final_state = emit_graph_events(config)
+                        span.set_trace_io(output={"answer": final_state.get("response")})
+
+            add_turn(session_id, query, final_state.get("response"))
+            events.put({
+                "type": "done",
+                "question": query,
+                "answer": final_state.get("response", "No response generated."),
+                "steps_taken": final_state.get("steps_taken", []),
+                "context_sources": final_state.get("context", []),
+                "citations": final_state.get("citations", []),
+                "judge_log": final_state.get("judge_log", []),
+                "trace_id": trace_id,
+            })
+        except Exception:
+            print(f"[Stream] Pipeline failed:\n{traceback.format_exc()}")
+            events.put({"type": "error", "message": "Failed to generate an answer. Check the server logs for details."})
+        finally:
+            events.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+    while True:
+        event = events.get()
+        if event is None:
+            break
+        yield event

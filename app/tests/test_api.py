@@ -33,6 +33,7 @@ def test_chat_passes_session_through_and_shapes_response(client, monkeypatch):
             "context": ["chunk"],
             "citations": [{"source": "handbook.docx", "distance": 0.2}],
             "judge_log": ["ACCEPT: fine"],
+            "trace_id": "trace-xyz",
         }
 
     monkeypatch.setattr(api, "run_orchestrator", fake_orchestrator)
@@ -43,6 +44,7 @@ def test_chat_passes_session_through_and_shapes_response(client, monkeypatch):
     assert body["answer"] == "an answer"
     assert body["steps_taken"] == ["vector_search", "generate", "judge"]
     assert body["citations"] == [{"source": "handbook.docx", "distance": 0.2}]
+    assert body["trace_id"] == "trace-xyz"
     assert captured == {"question": "What is X?", "session_id": "s-1", "user_id": None, "top_k": 5}
 
 
@@ -157,6 +159,34 @@ def test_delete_url_source_document(client, monkeypatch):
     r = client.delete("/documents/https://example.com/article")
     assert r.status_code == 200
     assert captured["source"] == "https://example.com/article"
+
+
+def test_feedback_records_score(client, monkeypatch):
+    captured = {}
+
+    def fake_record(trace_id, helpful, comment):
+        captured.update(trace_id=trace_id, helpful=helpful, comment=comment)
+
+    monkeypatch.setattr(api, "record_feedback", fake_record)
+
+    r = client.post("/feedback", json={"trace_id": "abc123", "helpful": False, "comment": "wrong policy"})
+    assert r.status_code == 200
+    assert captured == {"trace_id": "abc123", "helpful": False, "comment": "wrong policy"}
+
+
+def test_feedback_missing_trace_id_is_422(client):
+    r = client.post("/feedback", json={"helpful": True})
+    assert r.status_code == 422
+
+
+def test_feedback_failure_is_generic_500(client, monkeypatch):
+    def boom(*args):
+        raise RuntimeError("langfuse secret sk-lf-real exploded")
+
+    monkeypatch.setattr(api, "record_feedback", boom)
+    r = client.post("/feedback", json={"trace_id": "abc123", "helpful": True})
+    assert r.status_code == 500
+    assert "sk-lf-real" not in r.text
 
 
 def test_hitl_list(client, monkeypatch):
