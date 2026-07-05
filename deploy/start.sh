@@ -8,7 +8,11 @@ export API_BASE="http://127.0.0.1:8000"
 
 uvicorn api:app --host 127.0.0.1 --port 8000 &
 
+# CORS/XSRF must be off behind Hugging Face's reverse proxy, otherwise the
+# browser's file-upload requests are rejected with 403.
 exec streamlit run streamlit_app.py \
   --server.port "${PORT:-7860}" \
   --server.address 0.0.0.0 \
-  --server.headless true
+  --server.headless true \
+  --server.enableCORS false \
+  --server.enableXsrfProtection false
