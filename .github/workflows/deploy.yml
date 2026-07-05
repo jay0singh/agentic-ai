@@ -26,7 +26,10 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+          # Deploy as a single history-free commit: checkout is shallow, and
+          # Hugging Face rejects shallow pushes ("shallow update not allowed").
+          git checkout --orphan hf-deploy
           git add -A
           git commit -m "Deploy ${GITHUB_SHA::7} to Space"
           HF_USER="${HF_SPACE%%/*}"
-          git push --force "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main
+          git push --force "https://${HF_USER}:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" hf-deploy:main
