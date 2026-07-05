@@ -23,4 +23,5 @@ Set these under **Settings → Variables and secrets**:
 `GROQ_API_KEY`, `GOOGLE_API_KEY`, `DB_HOST`, `DB_USER`, `DB_PASSWORD`,
 `DB_NAME`, `DB_PORT` (usually 5432), `DB_SSLMODE=require`, `DB_TABLE=documents`.
 Optional: `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`,
-`LANGFUSE_BASE_URL`, `CHAT_MODEL`, `JUDGE_MODEL`.
+`LANGFUSE_BASE_URL`, `LANGFUSE_TRACING_ENVIRONMENT=production` (keeps hosted
+traces filterable apart from local development), `CHAT_MODEL`, `JUDGE_MODEL`.
