@@ -74,8 +74,7 @@ def test_ingest_rejects_unsupported_file_type(client):
 def test_ingest_accepts_txt(client, monkeypatch):
     monkeypatch.setattr(api, "load_document", lambda p: "some extracted text")
     monkeypatch.setattr(api, "setup_table", lambda: None)
-    monkeypatch.setattr(api, "delete_by_source", lambda s: 0)
-    monkeypatch.setattr(api, "embed_and_store", lambda chunks, source: None)
+    monkeypatch.setattr(api, "embed_and_store", lambda chunks, source: 0)
 
     r = client.post("/ingest", files={"file": ("notes.txt", b"hello world", "text/plain")})
     assert r.status_code == 200
@@ -85,10 +84,13 @@ def test_ingest_accepts_txt(client, monkeypatch):
 def test_ingest_url_success(client, monkeypatch):
     monkeypatch.setattr(api, "load_url", lambda u: ("Page Title", "page text content"))
     monkeypatch.setattr(api, "setup_table", lambda: None)
-    monkeypatch.setattr(api, "delete_by_source", lambda s: 3)
     captured = {}
-    monkeypatch.setattr(api, "embed_and_store",
-                        lambda chunks, source: captured.update(source=source))
+
+    def fake_embed(chunks, source):
+        captured["source"] = source
+        return 3  # embed_and_store now reports how many old chunks it replaced
+
+    monkeypatch.setattr(api, "embed_and_store", fake_embed)
 
     r = client.post("/ingest/url", json={"url": "https://example.com/article"})
     assert r.status_code == 200

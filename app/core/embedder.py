@@ -1,11 +1,12 @@
+import json
 import os
 import urllib.parse
+import uuid
 from datetime import datetime, timezone
 
 import psycopg
 from dotenv import load_dotenv
-from langchain_postgres import PGEngine, PGVectorStore
-from langchain_core.documents import Document
+from langchain_postgres import PGEngine
 
 from core.embeddings import get_embeddings, EMBED_MODEL, EMBED_DIM
 
@@ -36,15 +37,6 @@ def get_engine():
     if _engine is None:
         _engine = PGEngine.from_connection_string(url=CONNECTION_URL)
     return _engine
-
-
-def get_vector_store():
-    engine = get_engine()
-    return PGVectorStore.create_sync(
-        engine=engine,
-        table_name=TABLE,
-        embedding_service=get_embeddings(),
-    )
 
 
 def setup_table():
@@ -107,16 +99,32 @@ def list_documents() -> list[dict]:
         return []
 
 
-def embed_and_store(chunks: list[str], source: str = "unknown") -> None:
-    print(f"Embedding {len(chunks)} chunks using '{EMBED_MODEL}' via Gemini API...")
-    vector_store = get_vector_store()
+def embed_and_store(chunks: list[str], source: str = "unknown") -> int:
+    """Embed chunks, then atomically replace the source's existing rows.
 
-    # Convert chunks to LangChain Document objects, tagging each with its
-    # source file (so re-ingesting can replace old chunks) and ingest time.
+    Embedding (slow, can fail on rate limits) happens BEFORE anything is
+    deleted, and the delete+insert runs in one transaction — so the old
+    version of a document stays searchable until the new one fully lands,
+    and a failed embed loses nothing. Returns the number of replaced rows."""
+    print(f"Embedding {len(chunks)} chunks using '{EMBED_MODEL}' via Gemini API...")
+    vectors = get_embeddings().embed_documents(chunks)
+
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    documents = [
-        Document(page_content=chunk, metadata={"source": source, "ingested_at": ingested_at})
-        for chunk in chunks
-    ]
-    vector_store.add_documents(documents)
-    print("All chunks embedded and stored.")
+    metadata = json.dumps({"source": source, "ingested_at": ingested_at})
+
+    with psycopg.connect(**DB_CONFIG) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f'DELETE FROM "{TABLE}" WHERE langchain_metadata->>%s = %s',
+                ("source", source),
+            )
+            replaced = cur.rowcount
+            for chunk, vector in zip(chunks, vectors):
+                cur.execute(
+                    f'INSERT INTO "{TABLE}" (langchain_id, content, embedding, langchain_metadata) '
+                    f"VALUES (%s, %s, %s::vector, %s)",
+                    (str(uuid.uuid4()), chunk, str(vector), metadata),
+                )
+
+    print(f"All chunks embedded and stored ({replaced} old chunks replaced).")
+    return replaced

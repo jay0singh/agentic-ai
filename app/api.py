@@ -100,10 +100,7 @@ def ingest(file: UploadFile = File(...)):
         text = load_document(tmp_path)
         chunks = chunk_text(text, chunk_size=500, overlap=50)
         setup_table()
-        replaced = delete_by_source(filename)
-        if replaced:
-            print(f"[Ingest] Replacing {replaced} existing chunks for '{filename}'.")
-        embed_and_store(chunks, source=filename)
+        replaced = embed_and_store(chunks, source=filename)
     except Exception:
         # Log the full error server-side only — raw exception text can leak
         # connection strings or other internals to the client.
@@ -153,10 +150,7 @@ def ingest_url(request: IngestUrlRequest):
     try:
         chunks = chunk_text(text, chunk_size=500, overlap=50)
         setup_table()
-        replaced = delete_by_source(url)
-        if replaced:
-            print(f"[Ingest/url] Replacing {replaced} existing chunks for '{url}'.")
-        embed_and_store(chunks, source=url)
+        replaced = embed_and_store(chunks, source=url)
     except Exception:
         print(f"[Ingest/url] Failed for '{url}':\n{traceback.format_exc()}")
         raise HTTPException(
