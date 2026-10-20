@@ -52,8 +52,8 @@ User Query
 
 | Role | Model | Provider |
 |---|---|---|
-| Router / Generator | `llama-3.1-8b-instant` | Groq |
-| Judge | `llama-3.3-70b-versatile` | Groq |
+| Router / Generator | `openai/gpt-oss-20b` | Groq |
+| Judge | `openai/gpt-oss-120b` | Groq |
 | Embeddings | `gemini-embedding-001` (768-dim) | Google Gemini |
 
 ---
@@ -140,8 +140,8 @@ The API will be available at `http://127.0.0.1:8000`.
 
 Startup log should show:
 ```
-[Config] Chat model: Groq (llama-3.1-8b-instant)
-[Config] Judge model: Groq (llama-3.3-70b-versatile)
+[Config] Chat model: Groq (openai/gpt-oss-20b)
+[Config] Judge model: Groq (openai/gpt-oss-120b)
 ```
 
 ---
@@ -268,8 +268,8 @@ Response:
 | `vector_search` | Searched the ingested document database |
 | `web_search` | Searched the public web via Tavily |
 | `github_read` | Fetched content from a GitHub repository |
-| `generate` | Generated an answer using Groq llama-3.1-8b-instant |
-| `judge` | Evaluated the answer using Groq llama-3.3-70b-versatile |
+| `generate` | Generated an answer using Groq openai/gpt-oss-20b |
+| `judge` | Evaluated the answer using Groq openai/gpt-oss-120b |
 | `rewrite` | Query was rewritten and retried |
 | `hitl` | Max retries reached — flagged for human review |
 
