@@ -6,7 +6,7 @@ from core.graph import run_orchestrator
 
 load_dotenv()
 
-CHAT_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "openai/gpt-oss-20b")
 
 chat_model = ChatGroq(model=CHAT_MODEL, temperature=0)
 

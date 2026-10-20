@@ -31,8 +31,8 @@ if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
 
 # Both models run on Groq's free tier: a fast small model for routing/generation,
 # a larger model for stricter answer evaluation.
-CHAT_MODEL = os.getenv("CHAT_MODEL", "llama-3.1-8b-instant")
-JUDGE_MODEL = os.getenv("JUDGE_MODEL", "llama-3.3-70b-versatile")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "openai/gpt-oss-20b")
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", "openai/gpt-oss-120b")
 
 chat_model = ChatGroq(model=CHAT_MODEL, temperature=0)
 judge_model = ChatGroq(model=JUDGE_MODEL, temperature=0)
